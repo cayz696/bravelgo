@@ -41,7 +41,7 @@ def main() -> None:
     log_path = Path.home() / ".bravelgo-warmup.log"
 
     def log(msg: str) -> None:
-        line = f"[*] {msg}"
+        line = msg if msg.startswith("[") else f"[*] {msg}"
         print(line, flush=True)
         try:
             with open(log_path, "a", encoding="utf-8") as f:

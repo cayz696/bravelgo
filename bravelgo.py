@@ -412,10 +412,10 @@ class App(ModernApp):
         p = self.tab_warmup
         self._hint(
             self._card(p, "Human-like warmup"),
-            "Playwright uses the SAME ubuntu-* profile as Launch Firefox.\n"
-            "Order: Proxy Apply → Full uniquify (once) → Warmup → then Launch Firefox.\n"
-            "Do NOT Launch Firefox before Warmup. Close Firefox fully first.\n"
-            "Minimize UTM OK · UTM: disable pause when window inactive.",
+            "Selenium + system Firefox (same profile as Launch Firefox).\n"
+            "Order: Proxy Apply → Full uniquify → Warmup → Launch Firefox.\n"
+            "Close Firefox before start. Needs: sudo apt install firefox-geckodriver\n"
+            "Minimize UTM OK · watch Console or ~/.bravelgo-warmup.log",
         )
         opts = self._card(p, "Session")
         row = tk.Frame(opts, bg=C.SURFACE)

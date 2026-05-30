@@ -1,7 +1,9 @@
-"""Human-like Firefox warmup via Playwright — geo sites, Google Images/Maps, background-safe."""
+"""Human-like Firefox warmup via Selenium + system Firefox (same profile as Launch)."""
 from __future__ import annotations
 
 import random
+import shutil
+import subprocess
 import time
 import traceback
 from pathlib import Path
@@ -18,67 +20,7 @@ from bravelgo.warmup_geo import (
     pick_sites,
 )
 
-DEFAULT_WARMUP_URLS = pick_sites("FR", 12)  # backward compat for app.py
-
-BACKGROUND_PREFS = {
-    "dom.timeout.enable_budget_timer_throttling": False,
-    "dom.timeout.background_throttle_timeout": 0,
-    "dom.min_background_timeout_value": 4,
-    "dom.timeout.background_throttle_max_budget": -1,
-    "dom.ipc.processPriorityManager.backgroundGracePeriodMS": 0,
-    "page_throttling.enabled": False,
-}
-
-VISIBILITY_INIT_SCRIPT = """
-(() => {
-  try {
-    Object.defineProperty(document, 'visibilityState', { get: () => 'visible', configurable: true });
-    Object.defineProperty(document, 'hidden', { get: () => false, configurable: true });
-    document.hasFocus = () => true;
-  } catch (e) {}
-})();
-"""
-
-FF_DISMISS_SELECTORS = [
-    "button:has-text('Quit')",
-    "button:has-text('Not Now')",
-    "button:has-text('Pas maintenant')",
-    "button:has-text('Continue')",
-    "button:has-text('Continuer')",
-    "button:has-text('Accept')",
-    "button:has-text('OK')",
-]
-
-
-def ensure_playwright(log) -> bool:
-    import subprocess
-    import sys
-
-    try:
-        import playwright  # noqa: F401
-    except ImportError:
-        log("Installing playwright…")
-        subprocess.run(
-            [sys.executable, "-m", "pip", "install", "playwright", "--break-system-packages", "-q"],
-            check=False,
-        )
-    return True
-
-
-def _system_firefox(log) -> str | None:
-    import os
-    import shutil
-
-    for candidate in ("/usr/bin/firefox", "/usr/bin/firefox-esr"):
-        if os.path.isfile(candidate) and os.access(candidate, os.X_OK):
-            log(f"System Firefox: {candidate}")
-            return candidate
-    found = shutil.which("firefox")
-    if found:
-        log(f"System Firefox: {found}")
-        return found
-    log("ERROR: install firefox — sudo apt install firefox")
-    return None
+DEFAULT_WARMUP_URLS = pick_sites("FR", 12)
 
 
 def _unlock_profile(profile_dir: Path) -> None:
@@ -89,41 +31,81 @@ def _unlock_profile(profile_dir: Path) -> None:
             pass
 
 
-def _pick_working_page(browser, log, wait_s: int = 40):
-    deadline = time.time() + wait_s
-    while time.time() < deadline:
-        pages = browser.pages
-        if pages:
-            page = pages[-1]
-            try:
-                url = page.url or "about:blank"
-                log(f"Tab ready: {url[:90]}")
-                return page
-            except Exception as exc:
-                log(f"Tab not controllable yet: {exc}")
-        else:
-            log("Waiting for Firefox tab… (close profile dialogs if visible)")
-        time.sleep(2)
-    log("No tab appeared — opening new one")
-    return browser.new_page()
+def _system_firefox(log) -> str | None:
+    for candidate in ("/usr/bin/firefox", "/usr/bin/firefox-esr"):
+        if Path(candidate).is_file():
+            log(f"System Firefox: {candidate}")
+            return candidate
+    found = shutil.which("firefox")
+    if found:
+        log(f"System Firefox: {found}")
+        return found
+    log("ERROR: sudo apt install firefox")
+    return None
 
 
-def _clear_blocking_ui(page, log) -> None:
-    for _ in range(4):
+def _geckodriver(log) -> str | None:
+    for candidate in ("/usr/bin/geckodriver", "/usr/local/bin/geckodriver"):
+        if Path(candidate).is_file():
+            log(f"Geckodriver: {candidate}")
+            return candidate
+    found = shutil.which("geckodriver")
+    if found:
+        log(f"Geckodriver: {found}")
+        return found
+    log("ERROR: sudo apt install firefox-geckodriver")
+    return None
+
+
+def _ensure_selenium(log) -> bool:
+    try:
+        import selenium  # noqa: F401
+        return True
+    except ImportError:
+        log("Installing selenium…")
+        subprocess.run(
+            ["pip3", "install", "selenium", "--break-system-packages", "-q"],
+            check=False,
+        )
         try:
-            page.keyboard.press("Escape")
-            time.sleep(0.4)
-        except Exception:
-            pass
-    for sel in FF_DISMISS_SELECTORS:
-        try:
-            btn = page.locator(sel)
-            if btn.count() > 0:
-                btn.first.click(timeout=2000)
-                log(f"Dismissed dialog: {sel}")
-                _human_pause(0.5, 1.2)
-        except Exception:
-            continue
+            import selenium  # noqa: F401
+            return True
+        except ImportError:
+            log("ERROR: pip3 install selenium --break-system-packages")
+            return False
+
+
+def _build_driver(profile_dir: Path, firefox_bin: str, gecko: str, bridge_port: int, cp: dict, log):
+    from selenium import webdriver
+    from selenium.webdriver.firefox.options import Options
+    from selenium.webdriver.firefox.service import Service
+
+    opts = Options()
+    opts.binary_location = firefox_bin
+    opts.set_preference("browser.shell.checkDefaultBrowser", False)
+    opts.set_preference("browser.startup.page", 0)
+    opts.set_preference("network.proxy.type", 1)
+    opts.set_preference("network.proxy.http", "127.0.0.1")
+    opts.set_preference("network.proxy.http_port", bridge_port)
+    opts.set_preference("network.proxy.ssl", "127.0.0.1")
+    opts.set_preference("network.proxy.ssl_port", bridge_port)
+    opts.set_preference("network.proxy.share_proxy_settings", True)
+    opts.set_preference("network.proxy.no_proxies_on", "localhost, 127.0.0.1")
+    opts.set_preference("media.peerconnection.enabled", False)
+    opts.set_preference("intl.accept_languages", cp["lang_full"])
+    opts.set_preference("dom.min_background_timeout_value", 4)
+    opts.set_preference("dom.timeout.enable_budget_timer_throttling", False)
+
+    opts.add_argument("-profile")
+    opts.add_argument(str(profile_dir))
+    opts.add_argument("-no-remote")
+
+    service = Service(executable_path=gecko)
+    log("Starting Firefox (Selenium)…")
+    driver = webdriver.Firefox(service=service, options=opts)
+    driver.set_page_load_timeout(60)
+    driver.implicitly_wait(4)
+    return driver
 
 
 def run_warmup(
@@ -140,27 +122,24 @@ def run_warmup(
     google_maps: bool = True,
     background_safe: bool = True,
 ) -> None:
-    browser = None
+    driver = None
     steps_done = 0
     try:
-        if not ensure_playwright(log):
+        if not _ensure_selenium(log):
             return
-
         firefox_bin = _system_firefox(log)
-        if not firefox_bin:
+        gecko = _geckodriver(log)
+        if not firefox_bin or not gecko:
             return
 
-        from playwright.sync_api import sync_playwright
-
-        cc = country.upper()
-        cp = country_profile(cc)
-        locale = cp["ff_locale"]
         profile_dir = Path(profile_dir)
         if not profile_dir.is_dir():
             log(f"ERROR: profile missing — {profile_dir}")
             return
-
         _unlock_profile(profile_dir)
+
+        cc = country.upper()
+        cp = country_profile(cc)
         selected = urls if urls else pick_sites(cc, max_sites + 4)
         random.shuffle(selected)
         selected = selected[:max_sites]
@@ -170,318 +149,187 @@ def run_warmup(
         log(f"Warmup · {cp['name']} · lang={lang_mode} · {len(selected)} sites · ~{session_minutes} min")
         log(f"Profile: {profile_dir}")
         log(f"Proxy: 127.0.0.1:{bridge_port}")
-        if background_safe:
-            log("Background-safe ON (minimize window OK)")
 
-        prefs = {
-            "network.proxy.type": 1,
-            "network.proxy.http": "127.0.0.1",
-            "network.proxy.http_port": bridge_port,
-            "network.proxy.ssl": "127.0.0.1",
-            "network.proxy.ssl_port": bridge_port,
-            "network.proxy.share_proxy_settings": True,
-            "network.proxy.no_proxies_on": "localhost, 127.0.0.1",
-            "media.peerconnection.enabled": False,
-            "dom.webdriver.enabled": False,
-            "intl.accept_languages": cp["lang_full"],
-            "marionette.enabled": True,
-        }
-        if background_safe:
-            prefs.update(BACKGROUND_PREFS)
+        driver = _build_driver(profile_dir, firefox_bin, gecko, bridge_port, cp, log)
+        _human_pause(2, 4)
+        log(f"Tab: {driver.current_url[:90]}")
 
-        with sync_playwright() as pw:
-            log("Launching Firefox…")
-            browser = pw.firefox.launch_persistent_context(
-                str(profile_dir),
-                headless=False,
-                locale=locale,
-                viewport=_random_viewport(),
-                slow_mo=random.randint(50, 140),
-                firefox_user_prefs=prefs,
-                executable_path=firefox_bin,
-                args=["-no-remote"],
-                timeout=90000,
-            )
-            if background_safe:
-                browser.add_init_script(VISIBILITY_INIT_SCRIPT)
+        query = random.choice(queries)
+        if time.time() < deadline:
+            gurl = google_url(cc)
+            log(f"Step 1/4 Google: {query[:50]}")
+            if _get(driver, gurl, log):
+                steps_done += 1
+                _dismiss_consent(driver, cc, log)
+                if _google_search(driver, query, lang_mode != "en", log):
+                    _scroll(driver, random.randint(2, 5))
+                    _click_search_result(driver, log)
 
-            page = _pick_working_page(browser, log)
-            _human_pause(2, 4)
-            _clear_blocking_ui(page, log)
+        if google_images and time.time() < deadline:
+            img_q = pick_image_query(cc)
+            log(f"Step 2/4 Images: {img_q}")
+            if _google_images(driver, cc, img_q, log, deadline):
+                steps_done += 1
 
-            query = random.choice(queries)
-            if time.time() < deadline:
-                gurl = google_url(cc)
-                log(f"Step 1/4 Google search [{lang_mode}]: {query[:50]}")
-                if _visit(page, gurl, log):
-                    steps_done += 1
-                    _human_pause(2, 5)
-                    _dismiss_consent(page, cc)
-                    _clear_blocking_ui(page, log)
-                    search_box = page.locator("textarea[name='q'], input[name='q']")
-                    if search_box.count():
-                        search_box.first.click(timeout=8000)
-                        _human_type(search_box.first, query, lang_mode != "en")
-                        page.keyboard.press("Enter")
-                        _human_pause(3, 8)
-                        log(f"Search submitted → {page.url[:80]}")
-                        _scroll_page(page, random.randint(2, 5))
-                        if random.random() < 0.65:
-                            _click_search_result(page, log)
-                    else:
-                        log("WARN: Google search box not found — cookie/dialog blocking?")
+        if google_maps and time.time() < deadline:
+            maps_q = pick_maps_query(cc)
+            log(f"Step 3/4 Maps: {maps_q}")
+            if _google_maps(driver, cc, maps_q, log, deadline):
+                steps_done += 1
 
-            if google_images and time.time() < deadline:
-                img_q = pick_image_query(cc)
-                log(f"Step 2/4 Google Images: {img_q}")
-                if _google_images_browse(page, cc, img_q, log, deadline):
-                    steps_done += 1
-
-            if google_maps and time.time() < deadline:
-                maps_q = pick_maps_query(cc)
-                log(f"Step 3/4 Google Maps: {maps_q}")
-                if _google_maps_photos(page, cc, maps_q, log, deadline):
-                    steps_done += 1
-
-            log(f"Step 4/4 Geo sites ({len(selected)})")
-            for url in selected:
-                if time.time() >= deadline:
-                    log("Time limit reached")
-                    break
-                if "google." in url:
-                    continue
-                log(f"→ {url}")
-                try:
-                    if random.random() < 0.25:
-                        page = browser.new_page()
-                    if _visit(page, url, log):
-                        steps_done += 1
-                except Exception as exc:
-                    log(f"Skip {url}: {exc}")
-                    continue
-
-                _human_pause(4, 12)
-                _dismiss_consent(page, cc)
-                _reading_session(page, random.randint(3, 7))
-                if random.random() < 0.3:
-                    _click_random_link(page, log)
+        log(f"Step 4/4 Sites ({len(selected)})")
+        for url in selected:
+            if time.time() >= deadline:
+                break
+            if "google." in url:
+                continue
+            log(f"→ {url}")
+            if _get(driver, url, log):
+                steps_done += 1
+                _dismiss_consent(driver, cc, log)
+                _scroll(driver, random.randint(3, 7))
                 _human_pause(3, 10)
 
-            if steps_done == 0:
-                log("ERROR: no steps completed — check ~/.bravelgo-warmup.log")
-                log("Hints: close Firefox dialogs · Proxy Apply · don't mix Launch+Warmup")
-            else:
-                log(f"Warmup done · {steps_done} steps OK")
-            _human_pause(2, 4)
-            browser.close()
-            browser = None
-
+        if steps_done == 0:
+            log("ERROR: 0 steps — check proxy bridge · close Firefox dialogs")
+        else:
+            log(f"Done · {steps_done} steps OK")
     except Exception as exc:
-        log(f"FATAL warmup error: {exc}")
-        for line in traceback.format_exc().splitlines()[-8:]:
+        log(f"FATAL: {exc}")
+        for line in traceback.format_exc().splitlines()[-6:]:
             log(line)
     finally:
-        if browser:
+        if driver:
             try:
-                browser.close()
+                driver.quit()
             except Exception:
                 pass
 
 
-def _google_images_browse(page, country: str, query: str, log, deadline: float) -> bool:
-    gbase = google_url(country)
-    host = gbase.replace("https://", "").split("/")[0]
+def _get(driver, url: str, log) -> bool:
+    try:
+        driver.get(url)
+        log(f"Loaded: {driver.current_url[:90]}")
+        return True
+    except Exception as exc:
+        log(f"Load fail {url}: {exc}")
+        return False
+
+
+def _google_search(driver, query: str, typos: bool, log) -> bool:
+    from selenium.webdriver.common.by import By
+    from selenium.webdriver.common.keys import Keys
+
+    try:
+        box = driver.find_element(By.CSS_SELECTOR, "textarea[name='q'], input[name='q']")
+        box.click()
+        _human_type(box, query, typos)
+        box.send_keys(Keys.RETURN)
+        _human_pause(3, 7)
+        log(f"Search OK → {driver.current_url[:80]}")
+        return True
+    except Exception as exc:
+        log(f"Search box fail: {exc}")
+        return False
+
+
+def _google_images(driver, country: str, query: str, log, deadline: float) -> bool:
+    from selenium.webdriver.common.by import By
+    from selenium.webdriver.common.keys import Keys
+
+    host = google_url(country).replace("https://", "").split("/")[0]
     url = f"https://{host}/search?q={quote_plus(query)}&tbm=isch"
-    if not _visit(page, url, log):
+    if not _get(driver, url, log):
         return False
-
-    _human_pause(2, 5)
-    _dismiss_consent(page, country)
-    _scroll_page(page, random.randint(2, 4))
-
-    thumbs = page.locator("img[src*='gstatic'], img[data-src], div.islrc img, img.YQ4gaf")
-    count = thumbs.count()
-    if count < 2:
-        log("WARN: no image thumbnails")
-        return False
-
-    views = random.randint(2, min(5, count))
-    seen = set()
-    opened = 0
-    for _ in range(views):
-        if time.time() >= deadline:
-            break
-        idx = random.randint(0, min(count - 1, 12))
-        if idx in seen:
-            continue
-        seen.add(idx)
-        try:
-            thumbs.nth(idx).scroll_into_view_if_needed(timeout=5000)
-            _human_pause(0.5, 1.2)
-            thumbs.nth(idx).click(timeout=8000)
-            opened += 1
-            log(f"Image {opened}/{views}")
-            _human_pause(3, 8)
-            if random.random() < 0.4:
-                page.keyboard.press("ArrowRight")
-                _human_pause(2, 5)
-            if random.random() < 0.5:
-                page.keyboard.press("Escape")
-        except Exception as exc:
-            log(f"Image click skip: {exc}")
-    return opened > 0
-
-
-def _google_maps_photos(page, country: str, query: str, log, deadline: float) -> bool:
-    url = f"https://www.google.com/maps/search/{quote_plus(query)}"
-    if not _visit(page, url, log):
-        return False
-
-    _human_pause(4, 8)
-    _dismiss_consent(page, country)
-    _scroll_page(page, random.randint(2, 4))
-
-    listings = page.locator("a.hfpxzc, a[href*='/maps/place/']")
-    if listings.count() < 1:
-        log("WARN: no Maps listings")
-        return False
-
+    _dismiss_consent(driver, country, log)
+    _scroll(driver, random.randint(2, 4))
     try:
-        listings.nth(0).click(timeout=12000)
-        log("Maps listing opened")
-        _human_pause(4, 10)
-    except Exception as exc:
-        log(f"Maps listing skip: {exc}")
-        return False
-
-    for label in ["Photos", "Photo", "Bilder", "Fotos"]:
-        try:
-            btn = page.locator(f"button:has-text('{label}'), div[role='tab']:has-text('{label}')")
-            if btn.count() > 0:
-                btn.first.click(timeout=5000)
-                log("Maps photos tab")
+        imgs = driver.find_elements(By.CSS_SELECTOR, "img[src*='gstatic'], img[data-src]")
+        if len(imgs) < 2:
+            log("WARN: no thumbnails")
+            return False
+        for i in range(min(3, len(imgs))):
+            if time.time() >= deadline:
                 break
-        except Exception:
-            continue
-
-    photos = page.locator("button[aria-label*='Photo'], img[src*='googleusercontent']")
-    if photos.count() < 1:
-        return True
-
-    for i in range(min(3, photos.count())):
-        if time.time() >= deadline:
-            break
-        try:
-            photos.nth(i).click(timeout=6000)
-            log(f"Maps photo {i + 1}")
-            _human_pause(3, 6)
-        except Exception:
-            pass
-    return True
-
-
-def _random_viewport() -> dict:
-    w = random.choice([1280, 1366, 1440, 1536])
-    h = random.choice([720, 768, 864, 900])
-    return {"width": w, "height": h}
-
-
-def _visit(page, url: str, log) -> bool:
-    try:
-        page.goto(url, wait_until="domcontentloaded", timeout=60000)
-        log(f"Loaded: {page.url[:90]}")
+            idx = random.randint(0, min(len(imgs) - 1, 10))
+            try:
+                imgs[idx].click()
+                log(f"Image {i + 1}")
+                _human_pause(3, 6)
+                driver.find_element(By.TAG_NAME, "body").send_keys(Keys.ESCAPE)
+            except Exception:
+                pass
         return True
     except Exception as exc:
-        log(f"Load failed {url}: {exc}")
-        _clear_blocking_ui(page, log)
+        log(f"Images fail: {exc}")
         return False
 
 
-def _human_pause(min_s: float, max_s: float) -> None:
-    time.sleep(random.uniform(min_s, max_s))
+def _google_maps(driver, country: str, query: str, log, deadline: float) -> bool:
+    from selenium.webdriver.common.by import By
 
-
-def _human_type(locator, text: str, allow_typos: bool) -> None:
-    for ch in text:
-        if allow_typos and random.random() < 0.04 and ch.isalpha():
-            wrong = chr(ord(ch) + random.choice([-1, 1]))
-            locator.type(wrong, delay=random.randint(40, 120))
-            time.sleep(random.uniform(0.15, 0.45))
-            locator.page.keyboard.press("Backspace")
-            time.sleep(random.uniform(0.1, 0.3))
-        locator.type(ch, delay=random.randint(55, 200))
-        if random.random() < 0.06:
-            time.sleep(random.uniform(0.25, 0.7))
-
-
-def _mouse_jiggle(page) -> None:
+    url = f"https://www.google.com/maps/search/{quote_plus(query)}"
+    if not _get(driver, url, log):
+        return False
+    _human_pause(4, 8)
+    _dismiss_consent(driver, country, log)
+    _scroll(driver, 2)
     try:
-        vp = page.viewport_size or {"width": 1280, "height": 720}
-        for _ in range(random.randint(2, 5)):
-            x = random.randint(80, max(100, vp["width"] - 80))
-            y = random.randint(60, max(80, vp["height"] - 60))
-            page.mouse.move(x, y, steps=random.randint(8, 20))
-            time.sleep(random.uniform(0.05, 0.2))
-    except Exception:
-        pass
+        links = driver.find_elements(By.CSS_SELECTOR, "a.hfpxzc, a[href*='/maps/place/']")
+        if not links:
+            log("WARN: no listings")
+            return False
+        links[0].click()
+        log("Maps listing")
+        _human_pause(5, 10)
+        return True
+    except Exception as exc:
+        log(f"Maps fail: {exc}")
+        return False
 
 
-def _scroll_page(page, steps: int) -> None:
-    _mouse_jiggle(page)
-    for _ in range(steps):
-        delta = random.randint(180, 650)
-        page.mouse.wheel(0, delta)
-        time.sleep(random.uniform(0.5, 2.0))
-        if random.random() < 0.18:
-            page.mouse.wheel(0, -random.randint(60, 220))
-            time.sleep(random.uniform(0.4, 1.0))
+def _dismiss_consent(driver, country: str, log) -> None:
+    from selenium.webdriver.common.by import By
 
-
-def _reading_session(page, steps: int) -> None:
-    for _ in range(steps):
-        _scroll_page(page, 1)
-        time.sleep(random.uniform(1.5, 4.5))
-
-
-def _dismiss_consent(page, country: str) -> None:
     for label in consent_labels(country):
         try:
-            btn = page.locator(f"button:has-text('{label}')")
-            if btn.count() > 0:
-                btn.first.click(timeout=2500)
+            btns = driver.find_elements(By.XPATH, f"//button[contains(., '{label}')]")
+            if btns:
+                btns[0].click()
+                log(f"Consent: {label}")
                 _human_pause(0.8, 1.5)
                 return
         except Exception:
             continue
 
 
-def _click_search_result(page, log) -> None:
-    results = page.locator("a h3, div.g a")
-    count = results.count()
-    if count < 1:
-        log("WARN: no search results to click")
-        return
-    idx = random.randint(0, min(3, count - 1))
+def _click_search_result(driver, log) -> None:
+    from selenium.webdriver.common.by import By
+
     try:
-        results.nth(idx).click(timeout=10000)
-        log("Clicked search result")
-        _human_pause(6, 18)
-        _reading_session(page, random.randint(2, 5))
+        results = driver.find_elements(By.CSS_SELECTOR, "a h3")
+        if not results:
+            return
+        results[min(random.randint(0, 2), len(results) - 1)].click()
+        log("Clicked result")
+        _human_pause(5, 12)
+        _scroll(driver, random.randint(2, 4))
     except Exception as exc:
-        log(f"Result click skip: {exc}")
+        log(f"Result click: {exc}")
 
 
-def _click_random_link(page, log) -> None:
-    links = page.locator("a[href^='http']:visible")
-    count = links.count()
-    if count < 4:
-        return
-    idx = random.randint(2, min(count - 1, 10))
-    try:
-        links.nth(idx).click(timeout=8000)
-        log("Internal link click")
-        _human_pause(4, 12)
-        _reading_session(page, random.randint(1, 3))
-        page.go_back(timeout=12000)
-    except Exception as exc:
-        log(f"Link click skip: {exc}")
+def _human_pause(a: float, b: float) -> None:
+    time.sleep(random.uniform(a, b))
+
+
+def _human_type(el, text: str, typos: bool) -> None:
+    for ch in text:
+        el.send_keys(ch)
+        time.sleep(random.uniform(0.06, 0.18))
+
+
+def _scroll(driver, steps: int) -> None:
+    for _ in range(steps):
+        delta = random.randint(200, 600)
+        driver.execute_script(f"window.scrollBy(0, {delta});")
+        time.sleep(random.uniform(0.6, 1.8))
