@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import random
 import time
+import traceback
 from pathlib import Path
 from urllib.parse import quote_plus
 
@@ -19,7 +20,6 @@ from bravelgo.warmup_geo import (
 
 DEFAULT_WARMUP_URLS = pick_sites("FR", 12)  # backward compat for app.py
 
-# Keep timers/scripts running when Firefox or UTM window is minimized.
 BACKGROUND_PREFS = {
     "dom.timeout.enable_budget_timer_throttling": False,
     "dom.timeout.background_throttle_timeout": 0,
@@ -31,15 +31,23 @@ BACKGROUND_PREFS = {
 
 VISIBILITY_INIT_SCRIPT = """
 (() => {
-  const vis = () => 'visible';
-  const hid = () => false;
   try {
-    Object.defineProperty(document, 'visibilityState', { get: vis, configurable: true });
-    Object.defineProperty(document, 'hidden', { get: hid, configurable: true });
+    Object.defineProperty(document, 'visibilityState', { get: () => 'visible', configurable: true });
+    Object.defineProperty(document, 'hidden', { get: () => false, configurable: true });
     document.hasFocus = () => true;
   } catch (e) {}
 })();
 """
+
+FF_DISMISS_SELECTORS = [
+    "button:has-text('Quit')",
+    "button:has-text('Not Now')",
+    "button:has-text('Pas maintenant')",
+    "button:has-text('Continue')",
+    "button:has-text('Continuer')",
+    "button:has-text('Accept')",
+    "button:has-text('OK')",
+]
 
 
 def ensure_playwright(log) -> bool:
@@ -69,7 +77,7 @@ def _system_firefox(log) -> str | None:
     if found:
         log(f"System Firefox: {found}")
         return found
-    log("⚠ apt firefox not found — install: sudo apt install firefox")
+    log("ERROR: install firefox — sudo apt install firefox")
     return None
 
 
@@ -79,6 +87,43 @@ def _unlock_profile(profile_dir: Path) -> None:
             (profile_dir / name).unlink(missing_ok=True)
         except OSError:
             pass
+
+
+def _pick_working_page(browser, log, wait_s: int = 40):
+    deadline = time.time() + wait_s
+    while time.time() < deadline:
+        pages = browser.pages
+        if pages:
+            page = pages[-1]
+            try:
+                url = page.url or "about:blank"
+                log(f"Tab ready: {url[:90]}")
+                return page
+            except Exception as exc:
+                log(f"Tab not controllable yet: {exc}")
+        else:
+            log("Waiting for Firefox tab… (close profile dialogs if visible)")
+        time.sleep(2)
+    log("No tab appeared — opening new one")
+    return browser.new_page()
+
+
+def _clear_blocking_ui(page, log) -> None:
+    for _ in range(4):
+        try:
+            page.keyboard.press("Escape")
+            time.sleep(0.4)
+        except Exception:
+            pass
+    for sel in FF_DISMISS_SELECTORS:
+        try:
+            btn = page.locator(sel)
+            if btn.count() > 0:
+                btn.first.click(timeout=2000)
+                log(f"Dismissed dialog: {sel}")
+                _human_pause(0.5, 1.2)
+        except Exception:
+            continue
 
 
 def run_warmup(
@@ -95,132 +140,160 @@ def run_warmup(
     google_maps: bool = True,
     background_safe: bool = True,
 ) -> None:
-    if not ensure_playwright(log):
-        return
+    browser = None
+    steps_done = 0
+    try:
+        if not ensure_playwright(log):
+            return
 
-    firefox_bin = _system_firefox(log)
-    if not firefox_bin:
-        return
+        firefox_bin = _system_firefox(log)
+        if not firefox_bin:
+            return
 
-    from playwright.sync_api import sync_playwright
+        from playwright.sync_api import sync_playwright
 
-    cc = country.upper()
-    cp = country_profile(cc)
-    locale = cp["ff_locale"]
-    profile_dir = Path(profile_dir)
-    _unlock_profile(profile_dir)
-    selected = urls if urls else pick_sites(cc, max_sites + 4)
-    random.shuffle(selected)
-    selected = selected[:max_sites]
-    queries = pick_queries(cc, lang_mode)
-    deadline = time.time() + session_minutes * 60
+        cc = country.upper()
+        cp = country_profile(cc)
+        locale = cp["ff_locale"]
+        profile_dir = Path(profile_dir)
+        if not profile_dir.is_dir():
+            log(f"ERROR: profile missing — {profile_dir}")
+            return
 
-    log(f"Warmup · {cp['name']} · lang={lang_mode} · {len(selected)} sites · ~{session_minutes} min")
-    log(f"Profile: {profile_dir.name} · proxy 127.0.0.1:{bridge_port}")
-    if background_safe:
-        log("Background-safe ON — works when Firefox/UTM window minimized")
+        _unlock_profile(profile_dir)
+        selected = urls if urls else pick_sites(cc, max_sites + 4)
+        random.shuffle(selected)
+        selected = selected[:max_sites]
+        queries = pick_queries(cc, lang_mode)
+        deadline = time.time() + session_minutes * 60
 
-    prefs = {
-        "network.proxy.type": 1,
-        "network.proxy.http": "127.0.0.1",
-        "network.proxy.http_port": bridge_port,
-        "network.proxy.ssl": "127.0.0.1",
-        "network.proxy.ssl_port": bridge_port,
-        "network.proxy.share_proxy_settings": True,
-        "network.proxy.no_proxies_on": "localhost, 127.0.0.1",
-        "media.peerconnection.enabled": False,
-        "dom.webdriver.enabled": False,
-        "intl.accept_languages": cp["lang_full"],
-    }
-    if background_safe:
-        prefs.update(BACKGROUND_PREFS)
-
-    with sync_playwright() as pw:
-        launch_kw = dict(
-            headless=False,
-            locale=locale,
-            viewport=_random_viewport(),
-            slow_mo=random.randint(50, 140),
-            firefox_user_prefs=prefs,
-            executable_path=firefox_bin,
-        )
-        browser = pw.firefox.launch_persistent_context(str(profile_dir), **launch_kw)
+        log(f"Warmup · {cp['name']} · lang={lang_mode} · {len(selected)} sites · ~{session_minutes} min")
+        log(f"Profile: {profile_dir}")
+        log(f"Proxy: 127.0.0.1:{bridge_port}")
         if background_safe:
-            browser.add_init_script(VISIBILITY_INIT_SCRIPT)
+            log("Background-safe ON (minimize window OK)")
 
-        page = browser.pages[0] if browser.pages else browser.new_page()
+        prefs = {
+            "network.proxy.type": 1,
+            "network.proxy.http": "127.0.0.1",
+            "network.proxy.http_port": bridge_port,
+            "network.proxy.ssl": "127.0.0.1",
+            "network.proxy.ssl_port": bridge_port,
+            "network.proxy.share_proxy_settings": True,
+            "network.proxy.no_proxies_on": "localhost, 127.0.0.1",
+            "media.peerconnection.enabled": False,
+            "dom.webdriver.enabled": False,
+            "intl.accept_languages": cp["lang_full"],
+            "marionette.enabled": True,
+        }
+        if background_safe:
+            prefs.update(BACKGROUND_PREFS)
 
-        # ── Google text search ────────────────────────────────────────────────
-        query = random.choice(queries)
-        if time.time() < deadline:
-            gurl = google_url(cc)
-            log(f"Google [{lang_mode}]: {query[:50]}")
-            _visit(page, gurl, log)
-            _human_pause(2, 5)
-            _dismiss_consent(page, cc)
-            _human_pause(1, 3)
-            _mouse_jiggle(page)
-            search_box = page.locator("textarea[name='q'], input[name='q']")
-            if search_box.count():
-                search_box.first.click()
-                _human_type(search_box.first, query, lang_mode != "en")
-                page.keyboard.press("Enter")
-                _human_pause(3, 8)
-                _scroll_page(page, random.randint(2, 5))
-                if random.random() < 0.65:
-                    _click_search_result(page, log)
+        with sync_playwright() as pw:
+            log("Launching Firefox…")
+            browser = pw.firefox.launch_persistent_context(
+                str(profile_dir),
+                headless=False,
+                locale=locale,
+                viewport=_random_viewport(),
+                slow_mo=random.randint(50, 140),
+                firefox_user_prefs=prefs,
+                executable_path=firefox_bin,
+                args=["-no-remote"],
+                timeout=90000,
+            )
+            if background_safe:
+                browser.add_init_script(VISIBILITY_INIT_SCRIPT)
 
-        # ── Google Images (browse thumbnails like reference bot) ──────────────
-        if google_images and time.time() < deadline:
-            img_q = pick_image_query(cc)
-            log(f"Google Images: {img_q}")
-            _google_images_browse(page, cc, img_q, log, deadline)
+            page = _pick_working_page(browser, log)
+            _human_pause(2, 4)
+            _clear_blocking_ui(page, log)
 
-        # ── Google Maps (listings + photos) ───────────────────────────────────
-        if google_maps and time.time() < deadline:
-            maps_q = pick_maps_query(cc)
-            log(f"Google Maps: {maps_q}")
-            _google_maps_photos(page, cc, maps_q, log, deadline)
+            query = random.choice(queries)
+            if time.time() < deadline:
+                gurl = google_url(cc)
+                log(f"Step 1/4 Google search [{lang_mode}]: {query[:50]}")
+                if _visit(page, gurl, log):
+                    steps_done += 1
+                    _human_pause(2, 5)
+                    _dismiss_consent(page, cc)
+                    _clear_blocking_ui(page, log)
+                    search_box = page.locator("textarea[name='q'], input[name='q']")
+                    if search_box.count():
+                        search_box.first.click(timeout=8000)
+                        _human_type(search_box.first, query, lang_mode != "en")
+                        page.keyboard.press("Enter")
+                        _human_pause(3, 8)
+                        log(f"Search submitted → {page.url[:80]}")
+                        _scroll_page(page, random.randint(2, 5))
+                        if random.random() < 0.65:
+                            _click_search_result(page, log)
+                    else:
+                        log("WARN: Google search box not found — cookie/dialog blocking?")
 
-        # ── Geo + dev sites ───────────────────────────────────────────────────
-        for url in selected:
-            if time.time() >= deadline:
-                log("Session time limit reached")
-                break
-            if "google." in url:
-                continue
-            log(f"Visit: {url}")
+            if google_images and time.time() < deadline:
+                img_q = pick_image_query(cc)
+                log(f"Step 2/4 Google Images: {img_q}")
+                if _google_images_browse(page, cc, img_q, log, deadline):
+                    steps_done += 1
+
+            if google_maps and time.time() < deadline:
+                maps_q = pick_maps_query(cc)
+                log(f"Step 3/4 Google Maps: {maps_q}")
+                if _google_maps_photos(page, cc, maps_q, log, deadline):
+                    steps_done += 1
+
+            log(f"Step 4/4 Geo sites ({len(selected)})")
+            for url in selected:
+                if time.time() >= deadline:
+                    log("Time limit reached")
+                    break
+                if "google." in url:
+                    continue
+                log(f"→ {url}")
+                try:
+                    if random.random() < 0.25:
+                        page = browser.new_page()
+                    if _visit(page, url, log):
+                        steps_done += 1
+                except Exception as exc:
+                    log(f"Skip {url}: {exc}")
+                    continue
+
+                _human_pause(4, 12)
+                _dismiss_consent(page, cc)
+                _reading_session(page, random.randint(3, 7))
+                if random.random() < 0.3:
+                    _click_random_link(page, log)
+                _human_pause(3, 10)
+
+            if steps_done == 0:
+                log("ERROR: no steps completed — check ~/.bravelgo-warmup.log")
+                log("Hints: close Firefox dialogs · Proxy Apply · don't mix Launch+Warmup")
+            else:
+                log(f"Warmup done · {steps_done} steps OK")
+            _human_pause(2, 4)
+            browser.close()
+            browser = None
+
+    except Exception as exc:
+        log(f"FATAL warmup error: {exc}")
+        for line in traceback.format_exc().splitlines()[-8:]:
+            log(line)
+    finally:
+        if browser:
             try:
-                if random.random() < 0.25:
-                    page = browser.new_page()
-                page.goto(url, wait_until="domcontentloaded", timeout=45000)
-            except Exception as exc:
-                log(f"Skip {url}: {exc}")
-                continue
-
-            _human_pause(4, 12)
-            _dismiss_consent(page, cc)
-            _reading_session(page, random.randint(3, 7))
-
-            if random.random() < 0.3:
-                _click_random_link(page, log)
-
-            _human_pause(3, 10)
-
-        log("Warmup done")
-        _human_pause(2, 4)
-        browser.close()
+                browser.close()
+            except Exception:
+                pass
 
 
-def _google_images_browse(page, country: str, query: str, log, deadline: float) -> None:
+def _google_images_browse(page, country: str, query: str, log, deadline: float) -> bool:
     gbase = google_url(country)
     host = gbase.replace("https://", "").split("/")[0]
     url = f"https://{host}/search?q={quote_plus(query)}&tbm=isch"
-    try:
-        page.goto(url, wait_until="domcontentloaded", timeout=45000)
-    except Exception as exc:
-        log(f"Images skip: {exc}")
-        return
+    if not _visit(page, url, log):
+        return False
 
     _human_pause(2, 5)
     _dismiss_consent(page, country)
@@ -229,11 +302,12 @@ def _google_images_browse(page, country: str, query: str, log, deadline: float) 
     thumbs = page.locator("img[src*='gstatic'], img[data-src], div.islrc img, img.YQ4gaf")
     count = thumbs.count()
     if count < 2:
-        log("No image thumbnails found")
-        return
+        log("WARN: no image thumbnails")
+        return False
 
     views = random.randint(2, min(5, count))
     seen = set()
+    opened = 0
     for _ in range(views):
         if time.time() >= deadline:
             break
@@ -242,30 +316,26 @@ def _google_images_browse(page, country: str, query: str, log, deadline: float) 
             continue
         seen.add(idx)
         try:
-            _mouse_jiggle(page)
             thumbs.nth(idx).scroll_into_view_if_needed(timeout=5000)
             _human_pause(0.5, 1.2)
             thumbs.nth(idx).click(timeout=8000)
-            log(f"Viewing image {len(seen)}/{views}")
+            opened += 1
+            log(f"Image {opened}/{views}")
             _human_pause(3, 8)
-            _mouse_jiggle(page)
             if random.random() < 0.4:
                 page.keyboard.press("ArrowRight")
                 _human_pause(2, 5)
             if random.random() < 0.5:
                 page.keyboard.press("Escape")
-                _human_pause(1, 2)
-        except Exception:
-            continue
+        except Exception as exc:
+            log(f"Image click skip: {exc}")
+    return opened > 0
 
 
-def _google_maps_photos(page, country: str, query: str, log, deadline: float) -> None:
+def _google_maps_photos(page, country: str, query: str, log, deadline: float) -> bool:
     url = f"https://www.google.com/maps/search/{quote_plus(query)}"
-    try:
-        page.goto(url, wait_until="domcontentloaded", timeout=60000)
-    except Exception as exc:
-        log(f"Maps skip: {exc}")
-        return
+    if not _visit(page, url, log):
+        return False
 
     _human_pause(4, 8)
     _dismiss_consent(page, country)
@@ -273,53 +343,41 @@ def _google_maps_photos(page, country: str, query: str, log, deadline: float) ->
 
     listings = page.locator("a.hfpxzc, a[href*='/maps/place/']")
     if listings.count() < 1:
-        log("No map listings found")
-        return
+        log("WARN: no Maps listings")
+        return False
 
     try:
-        idx = random.randint(0, min(2, listings.count() - 1))
-        _mouse_jiggle(page)
-        listings.nth(idx).click(timeout=12000)
-        log("Opened Maps listing")
+        listings.nth(0).click(timeout=12000)
+        log("Maps listing opened")
         _human_pause(4, 10)
-        _scroll_page(page, random.randint(1, 3))
-    except Exception:
-        return
+    except Exception as exc:
+        log(f"Maps listing skip: {exc}")
+        return False
 
-    if time.time() >= deadline:
-        return
-
-    photo_labels = ["Photos", "Photo", "Bilder", "Fotos", "Foto", "Zdjęcia", "Immagini"]
-    for label in photo_labels:
+    for label in ["Photos", "Photo", "Bilder", "Fotos"]:
         try:
             btn = page.locator(f"button:has-text('{label}'), div[role='tab']:has-text('{label}')")
             if btn.count() > 0:
                 btn.first.click(timeout=5000)
                 log("Maps photos tab")
-                _human_pause(2, 5)
                 break
         except Exception:
             continue
 
-    photos = page.locator("button[aria-label*='Photo'], img[src*='googleusercontent'], button[data-photo-index]")
-    pc = photos.count()
-    if pc < 1:
-        return
+    photos = page.locator("button[aria-label*='Photo'], img[src*='googleusercontent']")
+    if photos.count() < 1:
+        return True
 
-    for _ in range(random.randint(2, min(4, pc))):
+    for i in range(min(3, photos.count())):
         if time.time() >= deadline:
             break
-        pi = random.randint(0, min(pc - 1, 8))
         try:
-            photos.nth(pi).scroll_into_view_if_needed(timeout=4000)
-            _human_pause(0.8, 2)
-            photos.nth(pi).click(timeout=6000)
-            log("Viewing Maps photo")
-            _human_pause(3, 7)
-            if random.random() < 0.5:
-                page.keyboard.press("Escape")
+            photos.nth(i).click(timeout=6000)
+            log(f"Maps photo {i + 1}")
+            _human_pause(3, 6)
         except Exception:
-            continue
+            pass
+    return True
 
 
 def _random_viewport() -> dict:
@@ -328,11 +386,15 @@ def _random_viewport() -> dict:
     return {"width": w, "height": h}
 
 
-def _visit(page, url: str, log) -> None:
+def _visit(page, url: str, log) -> bool:
     try:
-        page.goto(url, wait_until="domcontentloaded", timeout=45000)
+        page.goto(url, wait_until="domcontentloaded", timeout=60000)
+        log(f"Loaded: {page.url[:90]}")
+        return True
     except Exception as exc:
-        log(f"Open failed {url}: {exc}")
+        log(f"Load failed {url}: {exc}")
+        _clear_blocking_ui(page, log)
+        return False
 
 
 def _human_pause(min_s: float, max_s: float) -> None:
@@ -397,16 +459,16 @@ def _click_search_result(page, log) -> None:
     results = page.locator("a h3, div.g a")
     count = results.count()
     if count < 1:
+        log("WARN: no search results to click")
         return
     idx = random.randint(0, min(3, count - 1))
     try:
-        _mouse_jiggle(page)
         results.nth(idx).click(timeout=10000)
         log("Clicked search result")
         _human_pause(6, 18)
         _reading_session(page, random.randint(2, 5))
-    except Exception:
-        pass
+    except Exception as exc:
+        log(f"Result click skip: {exc}")
 
 
 def _click_random_link(page, log) -> None:
@@ -416,12 +478,10 @@ def _click_random_link(page, log) -> None:
         return
     idx = random.randint(2, min(count - 1, 10))
     try:
-        _mouse_jiggle(page)
         links.nth(idx).click(timeout=8000)
         log("Internal link click")
         _human_pause(4, 12)
         _reading_session(page, random.randint(1, 3))
         page.go_back(timeout=12000)
-        _human_pause(2, 5)
-    except Exception:
-        pass
+    except Exception as exc:
+        log(f"Link click skip: {exc}")

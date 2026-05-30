@@ -443,7 +443,7 @@ class App(ModernApp):
         self.v_warmup_images = tk.BooleanVar(value=True)
         self.v_warmup_maps = tk.BooleanVar(value=True)
         self.v_warmup_bg = tk.BooleanVar(value=True)
-        self.v_warmup_detached = tk.BooleanVar(value=True)
+        self.v_warmup_detached = tk.BooleanVar(value=False)
         for txt, var in [
             ("Google Images (browse photos)", self.v_warmup_images),
             ("Google Maps (listing + photos)", self.v_warmup_maps),
@@ -553,8 +553,9 @@ class App(ModernApp):
                     start_new_session=True,
                 )
             self.log(f"Detached PID {proc.pid} → {log_path}")
-            self.log("You can minimize UTM / close BravelGo — warmup continues")
+            self.log("Watch progress: Tail log · or tail -f ~/.bravelgo-warmup.log")
             self.set_status("Warmup detached", "ok")
+            self.root.after(8000, self._warmup_tail_log)
             return
 
         try:
