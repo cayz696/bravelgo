@@ -61,6 +61,7 @@ GEO_PACKS: dict[str, dict] = {
         "image_queries": ["new york skyline", "cute dog", "coffee aesthetic", "sunset beach"],
         "maps_queries": ["coffee shop brooklyn", "restaurant manhattan", "bookstore seattle"],
     },
+    "GB": {
         "google": "https://www.google.co.uk",
         "sites": [
             "https://www.bbc.co.uk",
