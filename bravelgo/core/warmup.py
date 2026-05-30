@@ -54,15 +54,31 @@ def ensure_playwright(log) -> bool:
             [sys.executable, "-m", "pip", "install", "playwright", "--break-system-packages", "-q"],
             check=False,
         )
-    r = subprocess.run(
-        [sys.executable, "-m", "playwright", "install", "firefox"],
-        capture_output=True,
-        text=True,
-    )
-    if r.returncode != 0:
-        log(f"playwright install failed: {r.stderr[:200]}")
-        return False
     return True
+
+
+def _system_firefox(log) -> str | None:
+    import os
+    import shutil
+
+    for candidate in ("/usr/bin/firefox", "/usr/bin/firefox-esr"):
+        if os.path.isfile(candidate) and os.access(candidate, os.X_OK):
+            log(f"System Firefox: {candidate}")
+            return candidate
+    found = shutil.which("firefox")
+    if found:
+        log(f"System Firefox: {found}")
+        return found
+    log("⚠ apt firefox not found — install: sudo apt install firefox")
+    return None
+
+
+def _unlock_profile(profile_dir: Path) -> None:
+    for name in ("lock", ".parentlock", "parent.lock"):
+        try:
+            (profile_dir / name).unlink(missing_ok=True)
+        except OSError:
+            pass
 
 
 def run_warmup(
@@ -82,11 +98,17 @@ def run_warmup(
     if not ensure_playwright(log):
         return
 
+    firefox_bin = _system_firefox(log)
+    if not firefox_bin:
+        return
+
     from playwright.sync_api import sync_playwright
 
     cc = country.upper()
     cp = country_profile(cc)
     locale = cp["ff_locale"]
+    profile_dir = Path(profile_dir)
+    _unlock_profile(profile_dir)
     selected = urls if urls else pick_sites(cc, max_sites + 4)
     random.shuffle(selected)
     selected = selected[:max_sites]
@@ -114,14 +136,15 @@ def run_warmup(
         prefs.update(BACKGROUND_PREFS)
 
     with sync_playwright() as pw:
-        browser = pw.firefox.launch_persistent_context(
-            str(profile_dir),
+        launch_kw = dict(
             headless=False,
             locale=locale,
             viewport=_random_viewport(),
             slow_mo=random.randint(50, 140),
             firefox_user_prefs=prefs,
+            executable_path=firefox_bin,
         )
+        browser = pw.firefox.launch_persistent_context(str(profile_dir), **launch_kw)
         if background_safe:
             browser.add_init_script(VISIBILITY_INIT_SCRIPT)
 

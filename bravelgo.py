@@ -412,9 +412,10 @@ class App(ModernApp):
         p = self.tab_warmup
         self._hint(
             self._card(p, "Human-like warmup"),
-            "Playwright drives your ubuntu-* Firefox profile.\n"
-            "Close Firefox first · Proxy bridge active · Minimize UTM/Firefox — warmup continues.\n"
-            "UTM Mac: Settings → disable «Pause machine when UTM window is not active».",
+            "Playwright uses the SAME ubuntu-* profile as Launch Firefox.\n"
+            "Order: Proxy Apply → Full uniquify (once) → Warmup → then Launch Firefox.\n"
+            "Do NOT Launch Firefox before Warmup. Close Firefox fully first.\n"
+            "Minimize UTM OK · UTM: disable pause when window inactive.",
         )
         opts = self._card(p, "Session")
         row = tk.Frame(opts, bg=C.SURFACE)
@@ -493,8 +494,15 @@ class App(ModernApp):
         _, bridge = _run("systemctl is-active bravelgo-bridge 2>/dev/null")
         if bridge.strip() != "active":
             self.log("⚠ Bridge not active — apply proxy first (Proxy tab)")
-        _run("killall -9 firefox 2>/dev/null")
-        time.sleep(1)
+        _run("killall -9 firefox firefox-esr 2>/dev/null")
+        time.sleep(2)
+        prof = self._active_profile_dir()
+        if prof:
+            for lock in ("lock", ".parentlock", "parent.lock"):
+                try:
+                    os.remove(os.path.join(prof, lock))
+                except OSError:
+                    pass
 
         fp = self.cfg.get("fingerprint", {})
         cc = fp.get("country_code", "FR")
