@@ -25,6 +25,7 @@ def main() -> None:
     parser.add_argument("--no-images", action="store_true")
     parser.add_argument("--no-maps", action="store_true")
     parser.add_argument("--no-background-safe", action="store_true")
+    parser.add_argument("--google", action="store_true", help="Include Google search/images/maps (automation visible)")
     args = parser.parse_args()
 
     urls = None
@@ -64,6 +65,7 @@ def main() -> None:
         google_images=not args.no_images,
         google_maps=not args.no_maps,
         background_safe=not args.no_background_safe,
+        skip_google=not args.google,
     )
 
 

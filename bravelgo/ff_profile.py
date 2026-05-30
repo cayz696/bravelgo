@@ -78,6 +78,7 @@ def write_user_js(profile_dir: str, fp: dict, real_user: str, proxy_enabled: boo
         'user_pref("media.peerconnection.ice.default_address_only", true);',
         'user_pref("media.peerconnection.ice.no_host", true);',
         'user_pref("dom.battery.enabled", false);',
+        'user_pref("dom.webdriver.enabled", false);',
         'user_pref("toolkit.telemetry.enabled", false);',
         'user_pref("datareporting.healthreport.uploadEnabled", false);',
         'user_pref("privacy.timezone.js.enabled", true);',

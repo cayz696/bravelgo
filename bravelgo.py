@@ -412,10 +412,9 @@ class App(ModernApp):
         p = self.tab_warmup
         self._hint(
             self._card(p, "Human-like warmup"),
-            "Selenium + system Firefox (same profile as Launch Firefox).\n"
-            "Order: Proxy Apply → Full uniquify → Warmup → Launch Firefox.\n"
-            "Close Firefox before start. Needs: sudo apt install firefox-geckodriver\n"
-            "Minimize UTM OK · watch Console or ~/.bravelgo-warmup.log",
+            "Selenium warmup · robot icon only while script runs.\n"
+            "NEVER log into Google during warmup. Use Launch Firefox for Google/Play login.\n"
+            "Recommended: keep «Skip Google» ON — warm up on lemonde, amazon, etc.",
         )
         opts = self._card(p, "Session")
         row = tk.Frame(opts, bg=C.SURFACE)
@@ -444,7 +443,9 @@ class App(ModernApp):
         self.v_warmup_maps = tk.BooleanVar(value=True)
         self.v_warmup_bg = tk.BooleanVar(value=True)
         self.v_warmup_detached = tk.BooleanVar(value=False)
+        self.v_warmup_skip_google = tk.BooleanVar(value=True)
         for txt, var in [
+            ("Skip Google (recommended — geo sites only)", self.v_warmup_skip_google),
             ("Google Images (browse photos)", self.v_warmup_images),
             ("Google Maps (listing + photos)", self.v_warmup_maps),
             ("Background-safe (minimize OK)", self.v_warmup_bg),
@@ -536,6 +537,8 @@ class App(ModernApp):
             cmd.append("--no-maps")
         if not self.v_warmup_bg.get():
             cmd.append("--no-background-safe")
+        if not self.v_warmup_skip_google.get():
+            cmd.append("--google")
 
         self.log(f"Warmup start · {cc} · {lang} · {max_sites} sites · {minutes} min")
         self.set_status("Warmup running…", "warn")

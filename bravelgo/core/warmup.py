@@ -22,6 +22,19 @@ from bravelgo.warmup_geo import (
 
 DEFAULT_WARMUP_URLS = pick_sites("FR", 12)
 
+STEALTH_JS = """
+try {
+  Object.defineProperty(navigator, 'webdriver', { get: () => undefined, configurable: true });
+} catch (e) {}
+"""
+
+
+def _stealth(driver, log) -> None:
+    try:
+        driver.execute_script(STEALTH_JS)
+    except Exception as exc:
+        log(f"Stealth skip: {exc}")
+
 
 def _unlock_profile(profile_dir: Path) -> None:
     for name in ("lock", ".parentlock", "parent.lock"):
@@ -93,6 +106,7 @@ def _build_driver(profile_dir: Path, firefox_bin: str, gecko: str, bridge_port: 
     opts.set_preference("network.proxy.no_proxies_on", "localhost, 127.0.0.1")
     opts.set_preference("media.peerconnection.enabled", False)
     opts.set_preference("intl.accept_languages", cp["lang_full"])
+    opts.set_preference("dom.webdriver.enabled", False)
     opts.set_preference("dom.min_background_timeout_value", 4)
     opts.set_preference("dom.timeout.enable_budget_timer_throttling", False)
 
@@ -121,6 +135,7 @@ def run_warmup(
     google_images: bool = True,
     google_maps: bool = True,
     background_safe: bool = True,
+    skip_google: bool = True,
 ) -> None:
     driver = None
     steps_done = 0
@@ -149,13 +164,17 @@ def run_warmup(
         log(f"Warmup · {cp['name']} · lang={lang_mode} · {len(selected)} sites · ~{session_minutes} min")
         log(f"Profile: {profile_dir}")
         log(f"Proxy: 127.0.0.1:{bridge_port}")
+        if skip_google:
+            log("Google steps OFF — geo sites only (safer before Google login)")
 
         driver = _build_driver(profile_dir, firefox_bin, gecko, bridge_port, cp, log)
         _human_pause(2, 4)
+        _stealth(driver, log)
         log(f"Tab: {driver.current_url[:90]}")
+        log("Note: robot icon = Selenium only · gone after quit · use Launch Firefox for Google login")
 
         query = random.choice(queries)
-        if time.time() < deadline:
+        if not skip_google and time.time() < deadline:
             gurl = google_url(cc)
             log(f"Step 1/4 Google: {query[:50]}")
             if _get(driver, gurl, log):
@@ -165,13 +184,13 @@ def run_warmup(
                     _scroll(driver, random.randint(2, 5))
                     _click_search_result(driver, log)
 
-        if google_images and time.time() < deadline:
+        if not skip_google and google_images and time.time() < deadline:
             img_q = pick_image_query(cc)
             log(f"Step 2/4 Images: {img_q}")
             if _google_images(driver, cc, img_q, log, deadline):
                 steps_done += 1
 
-        if google_maps and time.time() < deadline:
+        if not skip_google and google_maps and time.time() < deadline:
             maps_q = pick_maps_query(cc)
             log(f"Step 3/4 Maps: {maps_q}")
             if _google_maps(driver, cc, maps_q, log, deadline):
@@ -209,6 +228,7 @@ def run_warmup(
 def _get(driver, url: str, log) -> bool:
     try:
         driver.get(url)
+        _stealth(driver, log)
         log(f"Loaded: {driver.current_url[:90]}")
         return True
     except Exception as exc:
