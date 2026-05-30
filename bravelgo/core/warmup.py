@@ -28,6 +28,23 @@ try {
 } catch (e) {}
 """
 
+OVERLAY_LABELS = [
+    "Accept all", "Accept", "Tout accepter", "Accepter tout", "Accepter", "J'accepte",
+    "Refuser", "Reject all", "Reject", "Fermer", "Close", "Got it", "OK", "Compris",
+    "Continuer", "Continue", "No thanks", "Non merci", "Allow", "Autoriser",
+    "Save", "Enregistrer", "Agree", "I agree", "Dismiss", "Skip",
+]
+
+OVERLAY_SELECTORS = [
+    "button[aria-label*='Close']",
+    "button[aria-label*='Fermer']",
+    "button[aria-label*='lose']",
+    "[data-testid='close']",
+    "[class*='close']",
+    "[class*='dismiss']",
+    "button.modal-close",
+]
+
 
 def _stealth(driver, log) -> None:
     try:
@@ -179,7 +196,7 @@ def run_warmup(
             log(f"Step 1/4 Google: {query[:50]}")
             if _get(driver, gurl, log):
                 steps_done += 1
-                _dismiss_consent(driver, cc, log)
+                _handle_page(driver, log, cc)
                 if _google_search(driver, query, lang_mode != "en", log):
                     _scroll(driver, random.randint(2, 5))
                     _click_search_result(driver, log)
@@ -196,18 +213,21 @@ def run_warmup(
             if _google_maps(driver, cc, maps_q, log, deadline):
                 steps_done += 1
 
-        log(f"Step 4/4 Sites ({len(selected)})")
+        log(f"Step 4/4 Sites ({len(selected)}) — new tab per site")
+        main_handle = driver.current_window_handle
         for url in selected:
             if time.time() >= deadline:
                 break
             if "google." in url:
                 continue
             log(f"→ {url}")
-            if _get(driver, url, log):
+            if _open_in_new_tab(driver, url, log, cc):
                 steps_done += 1
-                _dismiss_consent(driver, cc, log)
+                _handle_page(driver, log, cc)
                 _scroll(driver, random.randint(3, 7))
                 _human_pause(3, 10)
+            _manage_popup_windows(driver, log, main_handle)
+            _trim_tabs(driver, log, max_tabs=5)
 
         if steps_done == 0:
             log("ERROR: 0 steps — check proxy bridge · close Firefox dialogs")
@@ -226,14 +246,162 @@ def run_warmup(
 
 
 def _get(driver, url: str, log) -> bool:
+    from selenium.common.exceptions import UnexpectedAlertPresentException
+
     try:
         driver.get(url)
-        _stealth(driver, log)
-        log(f"Loaded: {driver.current_url[:90]}")
-        return True
+    except UnexpectedAlertPresentException:
+        _dismiss_js_alert(driver, log)
+        try:
+            driver.get(url)
+        except Exception as exc:
+            log(f"Load fail {url}: {exc}")
+            return False
     except Exception as exc:
         log(f"Load fail {url}: {exc}")
         return False
+    _stealth(driver, log)
+    _handle_page(driver, log, None)
+    log(f"Loaded: {driver.current_url[:90]}")
+    return True
+
+
+def _open_in_new_tab(driver, url: str, log, country: str) -> bool:
+    try:
+        driver.switch_to.new_window("tab")
+        return _get(driver, url, log)
+    except Exception as exc:
+        log(f"New tab fail: {exc}")
+        return False
+
+
+def _handle_page(driver, log, country: str | None) -> None:
+    """JS alerts + cookie/modal overlays after each navigation."""
+    _dismiss_js_alert(driver, log)
+    if country:
+        _dismiss_consent(driver, country, log)
+    _dismiss_overlays(driver, log)
+    _manage_popup_windows(driver, log)
+
+
+def _dismiss_js_alert(driver, log) -> None:
+    try:
+        alert = driver.switch_to.alert
+        text = (alert.text or "")[:60]
+        alert.accept()
+        log(f"JS popup closed: {text}")
+        _human_pause(0.3, 0.8)
+    except Exception:
+        pass
+    try:
+        driver.switch_to.default_content()
+    except Exception:
+        pass
+
+
+def _dismiss_overlays(driver, log) -> None:
+    from selenium.webdriver.common.by import By
+    from selenium.webdriver.common.keys import Keys
+
+    for _ in range(2):
+        try:
+            body = driver.find_element(By.TAG_NAME, "body")
+            body.send_keys(Keys.ESCAPE)
+            _human_pause(0.3, 0.6)
+        except Exception:
+            pass
+
+    for label in OVERLAY_LABELS:
+        try:
+            btns = driver.find_elements(
+                By.XPATH,
+                f"//button[contains(translate(., 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), '{label.lower()}')]"
+                f" | //a[contains(translate(., 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), '{label.lower()}')]",
+            )
+            for btn in btns[:2]:
+                if btn.is_displayed():
+                    btn.click()
+                    log(f"Overlay: {label}")
+                    _human_pause(0.5, 1.2)
+                    return
+        except Exception:
+            continue
+
+    for sel in OVERLAY_SELECTORS:
+        try:
+            els = driver.find_elements(By.CSS_SELECTOR, sel)
+            for el in els[:3]:
+                if el.is_displayed():
+                    el.click()
+                    log(f"Overlay close: {sel}")
+                    _human_pause(0.4, 1.0)
+                    return
+        except Exception:
+            continue
+
+    # Common GDPR iframe (Sourcepoint, Didomi, etc.)
+    try:
+        iframes = driver.find_elements(By.CSS_SELECTOR, "iframe[title*='SP Consent'], iframe[id*='sp_message']")
+        for frame in iframes[:1]:
+            driver.switch_to.frame(frame)
+            for label in ("Accept", "Accepter", "Tout accepter", "Accept all"):
+                try:
+                    btn = driver.find_element(By.XPATH, f"//button[contains(., '{label}')]")
+                    btn.click()
+                    log(f"Consent iframe: {label}")
+                    break
+                except Exception:
+                    continue
+            driver.switch_to.default_content()
+    except Exception:
+        try:
+            driver.switch_to.default_content()
+        except Exception:
+            pass
+
+
+def _manage_popup_windows(driver, log, keep_handle: str | None = None) -> None:
+    """Close extra tabs opened by window.open / target=_blank spam."""
+    handles = driver.window_handles
+    if len(handles) <= 1:
+        return
+    keep = keep_handle if keep_handle in handles else handles[0]
+    for h in list(handles):
+        if h == keep:
+            continue
+        try:
+            driver.switch_to.window(h)
+            pop_url = driver.current_url[:70]
+            _dismiss_js_alert(driver, log)
+            _dismiss_overlays(driver, log)
+            if random.random() < 0.35:
+                _scroll(driver, 1)
+                _human_pause(2, 5)
+                log(f"Popup tab viewed: {pop_url}")
+            else:
+                log(f"Popup tab closed: {pop_url}")
+            driver.close()
+        except Exception as exc:
+            log(f"Popup close skip: {exc}")
+    try:
+        driver.switch_to.window(keep)
+    except Exception:
+        driver.switch_to.window(driver.window_handles[-1])
+
+
+def _trim_tabs(driver, log, max_tabs: int = 5) -> None:
+    while len(driver.window_handles) > max_tabs:
+        old = driver.window_handles[0]
+        try:
+            driver.switch_to.window(old)
+            log("Trim old tab")
+            driver.close()
+        except Exception:
+            break
+    try:
+        driver.switch_to.window(driver.window_handles[-1])
+    except Exception:
+        pass
 
 
 def _google_search(driver, query: str, typos: bool, log) -> bool:
@@ -261,7 +429,7 @@ def _google_images(driver, country: str, query: str, log, deadline: float) -> bo
     url = f"https://{host}/search?q={quote_plus(query)}&tbm=isch"
     if not _get(driver, url, log):
         return False
-    _dismiss_consent(driver, country, log)
+    _handle_page(driver, log, country)
     _scroll(driver, random.randint(2, 4))
     try:
         imgs = driver.find_elements(By.CSS_SELECTOR, "img[src*='gstatic'], img[data-src]")
@@ -292,7 +460,7 @@ def _google_maps(driver, country: str, query: str, log, deadline: float) -> bool
     if not _get(driver, url, log):
         return False
     _human_pause(4, 8)
-    _dismiss_consent(driver, country, log)
+    _handle_page(driver, log, country)
     _scroll(driver, 2)
     try:
         links = driver.find_elements(By.CSS_SELECTOR, "a.hfpxzc, a[href*='/maps/place/']")
