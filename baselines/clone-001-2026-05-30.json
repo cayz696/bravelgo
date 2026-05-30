@@ -1,0 +1,73 @@
+{
+  "label": "clone-001 golden after uniquify",
+  "captured": "2026-05-30",
+  "notes": "Baseline BrowserLeaks run — compare next clone against this file.",
+
+  "network": {
+    "ipv4": "188.126.30.13",
+    "ipv6": "n/a",
+    "country": "FR",
+    "city": "Paris",
+    "timezone": "Europe/Paris",
+    "isp": "Tngnet B.V.",
+    "webrtc_leak": "No Leak",
+    "webrtc_rtcpeerconnection": false,
+    "webrtc_rtcdatachannel": false,
+    "proxy_headers_detected": false,
+    "tor_detected": false
+  },
+
+  "browser": {
+    "user_agent": "Mozilla/5.0 (X11; Linux x86_64; rv:151.0) Gecko/20100101 Firefox/151.0",
+    "platform": "Linux x86_64",
+    "language": "fr-FR",
+    "languages": ["fr-FR", "fr;q=0.9", "en-US;q=0.8", "en;q=0.7"],
+    "locale_intl": "fr-FR",
+    "timezone_js": "Europe/Paris",
+    "hardware_concurrency": 3,
+    "webdriver": false,
+    "client_hints": "disabled"
+  },
+
+  "fingerprints": {
+    "canvas_signature": "2EBCFE3E45F0C1A5596B44330B71EDC3",
+    "webgl_report_hash": "D527A63E3EEBE22F58B9568D39264C13",
+    "webgl_image_hash": "52357C6B9D0D39CEFAC516A4D01B8C65",
+    "webgl_vendor": "Mozilla",
+    "webgl_renderer": "llvmpipe, or similar",
+    "webgl_unmasked_vendor": "Mesa",
+    "webgl_unmasked_renderer": "llvmpipe, or similar",
+    "font_metrics_hash": "CDAAA8B32607153FB595220551453DF3",
+    "font_unicode_hash": "382C0538",
+    "ja4_tls": "t13d1617h2_86a278354581_3cbfe9857e0d",
+    "ja3": "b147d88682b5d39fdfd065813b1a99e9"
+  },
+
+  "tcp_ip_fingerprint": {
+    "os_guess": "Android",
+    "mtu": 1340,
+    "link_type": "OpenVPN TCP bs128 SHA1 lzo",
+    "note": "Network stack guess ≠ real OS; UA is Linux Firefox (Variant A OK)"
+  },
+
+  "privacy_prefs_expected": {
+    "webrtc_peer_connections": false,
+    "webrtc_data_channel": false,
+    "geolocation_permission": "denied",
+    "battery_api": false,
+    "ipv6_browserleaks": "n/a"
+  },
+
+  "html5_css_feature_profile": "firefox-151-linux-ubuntu-vm-standard",
+  "feature_highlights": {
+    "webrtc_peer_connections": false,
+    "webrtc_data_channel": false,
+    "speech_recognition": false,
+    "quota_storage_management": false,
+    "connection_effective_type": false,
+    "battery_api": false,
+    "filesystem_api": false,
+    "css_grid_legacy": false,
+    "html_imports": false
+  }
+}
