@@ -6,7 +6,7 @@ Variant A + Modern UI | Ubuntu 24.04 | UTM
 
 ```bash
 # First time — clone from GitHub
-git clone https://github.com/YOUR_USER/bravelgo.git ~/Desktop/google
+git clone https://github.com/cayz696/bravelgo.git ~/Desktop/google
 cd ~/Desktop/google
 sudo apt install -y python3 python3-tk curl
 pip3 install playwright --break-system-packages
