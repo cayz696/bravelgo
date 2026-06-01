@@ -128,24 +128,22 @@ def resolve_firefox_binary(log=None, install_if_missing: bool = False) -> str | 
         return launcher
 
     if install_if_missing and hasattr(os, "geteuid") and os.geteuid() == 0:
+        from bravelgo.deps import reinstall_firefox
+
         if log:
-            log("Firefox not found — installing via apt…")
-        subprocess.run(["apt-get", "update", "-qq"], check=False)
-        subprocess.run(
-            ["apt-get", "install", "-y", "firefox", "firefox-geckodriver"],
-            check=False,
-        )
-        for path in _firefox_candidates():
-            resolved = _resolve_firefox_path(path)
-            if resolved:
+            log("Firefox not found — reinstalling…")
+        if reinstall_firefox(log):
+            for path in _firefox_candidates():
+                resolved = _resolve_firefox_path(path)
+                if resolved:
+                    if log:
+                        log(f"Firefox installed: {resolved}")
+                    return resolved
+            launcher = shutil.which("firefox")
+            if launcher:
                 if log:
-                    log(f"Firefox installed: {resolved}")
-                return resolved
-        launcher = shutil.which("firefox")
-        if launcher:
-            if log:
-                log(f"Firefox launcher: {launcher}")
-            return launcher
+                    log(f"Firefox launcher: {launcher}")
+                return launcher
 
     if log:
         if launcher and "/snap/" in launcher:
@@ -155,54 +153,7 @@ def resolve_firefox_binary(log=None, install_if_missing: bool = False) -> str | 
     return None
 
 
-def ensure_warmup_deps(log) -> bool:
-    """Install Firefox/geckodriver/selenium — call from sudo bravelgo before warmup."""
-    import os
-    import shutil
-    import subprocess
-    from pathlib import Path
-
-    if os.geteuid() != 0:
-        return True
-
-    need: list[str] = []
-    has_ff = any(Path(p).is_file() for p in ("/usr/lib/firefox/firefox", "/usr/lib/firefox-esr/firefox"))
-    if not has_ff and not shutil.which("firefox"):
-        need.append("firefox")
-    if not Path("/usr/bin/geckodriver").is_file() and not shutil.which("geckodriver"):
-        need.append("firefox-geckodriver")
-
-    if need:
-        log(f"Installing {' '.join(need)}…")
-        subprocess.run(["apt-get", "update", "-qq"], check=False)
-        proc = subprocess.run(
-            ["apt-get", "install", "-y", *need],
-            capture_output=True,
-            text=True,
-        )
-        if proc.returncode != 0:
-            tail = (proc.stderr or proc.stdout or "").strip().splitlines()
-            if tail:
-                log(tail[-1][:120])
-
-    from bravelgo.pip_install import ensure_import
-
-    if not ensure_import("selenium", log=log):
-        return False
-
-    ff = resolve_firefox_binary(log)
-    gecko = shutil.which("geckodriver") or "/usr/bin/geckodriver"
-    if not ff:
-        log("ERROR: Firefox missing — sudo apt install firefox")
-        return False
-    if not Path(gecko).is_file() and not shutil.which("geckodriver"):
-        log("ERROR: geckodriver missing — sudo apt install firefox-geckodriver")
-        return False
-    log(f"Warmup deps OK · geckodriver={gecko}")
-    return True
-
-
-def _firefox_candidates() -> list[str]:
+def launch_profile(real_user: str, profile_dir: str, log) -> None:
     import glob
     import shutil
 

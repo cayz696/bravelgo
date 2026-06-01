@@ -477,6 +477,7 @@ class App(ModernApp):
         bf = tk.Frame(p, bg=C.BG)
         bf.pack(fill="x", pady=(0, 8))
         self._btn(bf, "Refresh URLs from profile country", self._warmup_refresh_urls, variant="ghost", side="left", padx=(0, 8))
+        self._btn(bf, "Reinstall Firefox", self._warmup_reinstall_ff, variant="ghost", side="left", padx=(0, 8))
         self._btn(bf, "Start warmup", self._warmup_thread, variant="primary", side="left", padx=(0, 8))
         self._btn(bf, "Tail log", self._warmup_tail_log, variant="ghost", side="left")
 
@@ -500,15 +501,27 @@ class App(ModernApp):
     def _warmup_thread(self):
         threading.Thread(target=self._warmup_run, daemon=True).start()
 
+    def _warmup_reinstall_ff(self):
+        def work():
+            from bravelgo.deps import reinstall_firefox, install_geckodriver, install_selenium
+
+            self.log("=== Reinstall Firefox stack ===")
+            ok = reinstall_firefox(self.log)
+            ok = install_geckodriver(self.log) and ok
+            ok = install_selenium(REAL_USER, self.log) and ok
+            self.set_status("Firefox OK" if ok else "Install failed", "ok" if ok else "idle")
+
+        threading.Thread(target=work, daemon=True).start()
+
     def _warmup_run(self):
         profile = self._active_profile_dir()
         if not profile:
             self.root.after(0, lambda: messagebox.showerror("Warmup", "No Firefox profile — run Full uniquify first"))
             return
 
-        from bravelgo.ff_profile import ensure_warmup_deps
+        from bravelgo.deps import ensure_warmup_deps
 
-        if not ensure_warmup_deps(self.log):
+        if not ensure_warmup_deps(self.log, REAL_USER):
             self.set_status("Warmup blocked — install deps", "idle")
             return
 

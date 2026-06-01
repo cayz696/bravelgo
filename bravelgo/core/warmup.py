@@ -154,9 +154,13 @@ def _geckodriver(log) -> str | None:
 
 
 def _ensure_selenium(log) -> bool:
-    from bravelgo.pip_install import ensure_import
-
-    return ensure_import("selenium", log=log)
+    """Warmup runs as desktop user — import check only (deps installed in preflight)."""
+    try:
+        import selenium  # noqa: F401
+        return True
+    except ImportError:
+        log("ERROR: selenium missing — click Reinstall Firefox or restart warmup")
+        return False
 
 
 def run_warmup(

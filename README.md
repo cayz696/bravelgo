@@ -9,44 +9,32 @@ git clone https://github.com/cayz696/bravelgo.git ~/Desktop/google
 cd ~/Desktop/google
 
 sudo apt update
-sudo apt install -y git curl firefox firefox-geckodriver \
-  python3 python3-pip python3-tk jq
+sudo apt install -y git curl python3 python3-pip python3-tk jq
 
-sudo python3 -m pip install selenium PySocks --break-system-packages
 sudo python3 bravelgo.py
 ```
 
-> On a bare Ubuntu, `python3-pip` is required — without it warmup fails with `No such file or directory: pip3`.
+On first **Start warmup**, BravelGo (as root) will:
+- remove snap Firefox (if any) and install **deb Firefox**
+- install **geckodriver** (apt or download from GitHub if package missing)
+- install **selenium** for your desktop user (`pip install --user`)
+
+Or click **Reinstall Firefox** on the Warmup tab.
 
 ## Update later
 
 ```bash
-cd ~/Desktop/google
-git pull
+cd ~/Desktop/google && git pull
 sudo python3 bravelgo.py
-```
-
-## Structure
-
-```
-google/
-  bravelgo.py           ← run this
-  bravelgo/
-    core/warmup.py      ← Selenium warmup (firefox-geckodriver)
-    proxy_geo.py        ← geo lookup (PySocks) + bridge 127.0.0.1:8118
-    ff_profile.py       ← Firefox profile (user.js)
 ```
 
 ## Workflow
 
-1. UTM: clone VM → new MAC
-2. Disk → Mount MacFolder
-3. Proxy → Save → Test → Apply
-4. Full uniquify → Run check → reboot
-5. Warmup ×3–5 (**Skip Google ON**)
-6. Launch Firefox → Google / Play Console
+1. UTM clone → Disk Mount → Proxy Apply
+2. Full uniquify → reboot → Proxy Apply
+3. Warmup ×3–5 (**Skip Google ON**)
+4. Launch Firefox → Google / Play Console
 
 ## Config
 
-`~/.bravelgo.json` — proxies, fingerprint, ff_profile path  
-`~/MacFolder/.bravelgo-registry.json` — cross-clone ID ledger
+`~/.bravelgo.json` — proxies, fingerprint, ff_profile path
