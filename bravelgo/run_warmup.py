@@ -23,7 +23,7 @@ def main() -> None:
     parser.add_argument("--minutes", type=int, default=15)
     parser.add_argument("--urls-file")
     parser.add_argument("--no-images", action="store_true")
-    parser.add_argument("--no-maps", action="store_true")
+    parser.add_argument("--no-maps", action="store_true", help="Skip Google Maps geo step")
     parser.add_argument("--no-background-safe", action="store_true")
     parser.add_argument("--google", action="store_true", help="Include Google search/images/maps (automation visible)")
     args = parser.parse_args()

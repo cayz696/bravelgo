@@ -6,6 +6,7 @@ import shutil
 import subprocess
 import time
 import traceback
+import urllib.request
 from pathlib import Path
 from urllib.parse import quote_plus
 
@@ -14,6 +15,7 @@ from bravelgo.proxy_geo import BRIDGE_PORT
 from bravelgo.warmup_geo import (
     consent_labels,
     google_url,
+    maps_search_url,
     pick_image_query,
     pick_maps_query,
     pick_queries,
@@ -44,6 +46,18 @@ OVERLAY_SELECTORS = [
     "[class*='dismiss']",
     "button.modal-close",
 ]
+
+MAPS_PHOTO_TAB_LABELS = [
+    "Photos", "Photo", "Fotos", "Foto", "Bilder", "Afbeeldingen", "Zdjęcia",
+    "Immagini", "Imagens", "Фото", "Kuvat", "Bilder",
+]
+
+MAPS_PHOTO_JS = """
+const imgs = [...document.querySelectorAll('img[src*="googleusercontent"], img[src*="ggpht"]')]
+  .filter(i => i.offsetParent !== null && (i.naturalWidth || i.width) > 120)
+  .sort((a, b) => (b.naturalWidth || b.width) - (a.naturalWidth || a.width));
+return imgs.length ? imgs[0].src : null;
+"""
 
 
 def _stealth(driver, log) -> None:
@@ -115,7 +129,8 @@ def _build_driver(profile_dir: Path, firefox_bin: str, gecko: str, bridge_port: 
         try:
             opts = _firefox_options(profile_dir, bridge_port, cp, binary)
             driver = webdriver.Firefox(service=service, options=opts)
-            driver.set_page_load_timeout(60)
+            driver.set_page_load_timeout(25)
+            driver.set_script_timeout(20)
             driver.implicitly_wait(4)
             log(f"Firefox OK · {label}")
             return driver
@@ -198,7 +213,9 @@ def run_warmup(
         log(f"Profile: {profile_dir}")
         log(f"Proxy: 127.0.0.1:{bridge_port}")
         if skip_google:
-            log("Google steps OFF — geo sites only (safer before Google login)")
+            log("Google search/images OFF — geo sites + Maps (if enabled)")
+        else:
+            log("Google search/images ON — higher CAPTCHA risk")
 
         driver = _build_driver(profile_dir, firefox_bin, gecko, bridge_port, cp, log)
         _human_pause(2, 4)
@@ -209,7 +226,7 @@ def run_warmup(
         query = random.choice(queries)
         if not skip_google and time.time() < deadline:
             gurl = google_url(cc)
-            log(f"Step 1/4 Google: {query[:50]}")
+            log(f"Google search: {query[:50]}")
             if _get(driver, gurl, log):
                 steps_done += 1
                 _handle_page(driver, log, cc)
@@ -219,17 +236,17 @@ def run_warmup(
 
         if not skip_google and google_images and time.time() < deadline:
             img_q = pick_image_query(cc)
-            log(f"Step 2/4 Images: {img_q}")
+            log(f"Google Images: {img_q}")
             if _google_images(driver, cc, img_q, log, deadline):
                 steps_done += 1
 
-        if not skip_google and google_maps and time.time() < deadline:
+        if google_maps and time.time() < deadline:
             maps_q = pick_maps_query(cc)
-            log(f"Step 3/4 Maps: {maps_q}")
+            log(f"Google Maps (geo): {maps_q}")
             if _google_maps(driver, cc, maps_q, log, deadline):
                 steps_done += 1
 
-        log(f"Step 4/4 Sites ({len(selected)}) — new tab per site")
+        log(f"Geo sites ({len(selected)}) — new tab per site")
         main_handle = driver.current_window_handle
         for url in selected:
             if time.time() >= deadline:
@@ -240,8 +257,7 @@ def run_warmup(
             if _open_in_new_tab(driver, url, log, cc):
                 steps_done += 1
                 _handle_page(driver, log, cc)
-                _scroll(driver, random.randint(3, 7))
-                _human_pause(3, 10)
+                _browse_page(driver, random.uniform(10, 22))
             _manage_popup_windows(driver, log, main_handle)
             _trim_tabs(driver, log, max_tabs=5)
 
@@ -262,7 +278,7 @@ def run_warmup(
 
 
 def _get(driver, url: str, log) -> bool:
-    from selenium.common.exceptions import UnexpectedAlertPresentException
+    from selenium.common.exceptions import TimeoutException, UnexpectedAlertPresentException
 
     try:
         driver.get(url)
@@ -273,6 +289,12 @@ def _get(driver, url: str, log) -> bool:
         except Exception as exc:
             log(f"Load fail {url}: {exc}")
             return False
+    except TimeoutException:
+        try:
+            driver.execute_script("window.stop();")
+        except Exception:
+            pass
+        log(f"Load partial (timeout OK): {url[:70]}")
     except Exception as exc:
         log(f"Load fail {url}: {exc}")
         return False
@@ -471,25 +493,165 @@ def _google_images(driver, country: str, query: str, log, deadline: float) -> bo
 
 def _google_maps(driver, country: str, query: str, log, deadline: float) -> bool:
     from selenium.webdriver.common.by import By
+    from selenium.webdriver.common.keys import Keys
 
-    url = f"https://www.google.com/maps/search/{quote_plus(query)}"
+    url = maps_search_url(country, query)
     if not _get(driver, url, log):
         return False
-    _human_pause(4, 8)
+    _human_pause(3, 6)
     _handle_page(driver, log, country)
-    _scroll(driver, 2)
+    _maps_scroll_feed(driver, random.randint(2, 5))
     try:
         links = driver.find_elements(By.CSS_SELECTOR, "a.hfpxzc, a[href*='/maps/place/']")
         if not links:
-            log("WARN: no listings")
+            log("WARN: no map listings")
             return False
-        links[0].click()
-        log("Maps listing")
-        _human_pause(5, 10)
+        idx = random.randint(0, min(len(links) - 1, 4))
+        listing = links[idx]
+        name = (listing.get_attribute("aria-label") or query)[:50]
+        listing.click()
+        log(f"Maps place: {name}")
+        _human_pause(4, 8)
+        _maps_scroll_feed(driver, random.randint(1, 3))
+
+        if not _maps_open_photos(driver, log):
+            log("Photos tab not found — browsed listing only")
+            return True
+
+        _human_pause(2, 4)
+        _maps_open_gallery(driver, log)
+        want = random.randint(2, 3)
+        saved = _maps_browse_and_download(driver, log, deadline, want)
+        log(f"Maps photos: viewed gallery · saved {saved}/{want}")
+        try:
+            driver.find_element(By.TAG_NAME, "body").send_keys(Keys.ESCAPE)
+        except Exception:
+            pass
         return True
     except Exception as exc:
         log(f"Maps fail: {exc}")
         return False
+
+
+def _maps_scroll_feed(driver, steps: int) -> None:
+    for _ in range(steps):
+        delta = random.randint(180, 520)
+        driver.execute_script(
+            """
+            const feed = document.querySelector('[role="feed"]') ||
+              document.querySelector('.m6QErb[aria-label]') ||
+              document.querySelector('.m6QErb');
+            if (feed) feed.scrollBy(0, arguments[0]);
+            else window.scrollBy(0, arguments[0]);
+            """,
+            delta,
+        )
+        _human_pause(0.8, 2.2)
+
+
+def _maps_open_photos(driver, log) -> bool:
+    from selenium.webdriver.common.by import By
+
+    for label in MAPS_PHOTO_TAB_LABELS:
+        try:
+            tabs = driver.find_elements(
+                By.XPATH,
+                f"//button[contains(., '{label}') or contains(@aria-label, '{label}')]",
+            )
+            if tabs:
+                tabs[0].click()
+                log(f"Maps tab: {label}")
+                _human_pause(2, 4)
+                return True
+        except Exception:
+            continue
+    try:
+        btn = driver.find_element(By.CSS_SELECTOR, "button[data-item-id='photos']")
+        btn.click()
+        log("Maps tab: photos")
+        _human_pause(2, 4)
+        return True
+    except Exception:
+        return False
+
+
+def _maps_open_gallery(driver, log) -> None:
+    from selenium.webdriver.common.by import By
+
+    selectors = [
+        "button[jsaction*='pane.preview.gallery']",
+        "button[aria-label*='Photo']",
+        "div[role='img'][style*='background-image']",
+        "button[jsaction*='photo']",
+    ]
+    for sel in selectors:
+        try:
+            items = driver.find_elements(By.CSS_SELECTOR, sel)
+            if items:
+                items[random.randint(0, min(len(items) - 1, 2))].click()
+                log("Maps: opened photo viewer")
+                _human_pause(2, 5)
+                return
+        except Exception:
+            continue
+
+
+def _maps_browse_and_download(driver, log, deadline: float, max_photos: int) -> int:
+    from selenium.webdriver.common.by import By
+    from selenium.webdriver.common.keys import Keys
+
+    dest_dir = Path.home() / "Downloads" / "bravelgo-maps"
+    dest_dir.mkdir(parents=True, exist_ok=True)
+    saved = 0
+    body = driver.find_element(By.TAG_NAME, "body")
+    for i in range(max_photos):
+        if time.time() >= deadline:
+            break
+        _human_pause(2, 5)
+        src = driver.execute_script(MAPS_PHOTO_JS)
+        if src and _maps_save_photo(src, dest_dir, i + 1, log):
+            saved += 1
+        if i < max_photos - 1:
+            body.send_keys(Keys.ARROW_RIGHT)
+            _human_pause(1.5, 3.5)
+    return saved
+
+
+def _maps_save_photo(url: str, dest_dir: Path, seq: int, log) -> bool:
+    ext = ".jpg"
+    if ".png" in url.split("?")[0].lower():
+        ext = ".png"
+    dest = dest_dir / f"maps_{int(time.time())}_{seq}{ext}"
+    try:
+        req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+        with urllib.request.urlopen(req, timeout=20) as resp:
+            data = resp.read()
+        if len(data) < 5000:
+            return False
+        dest.write_bytes(data)
+        log(f"Photo saved: {dest.name}")
+        return True
+    except Exception as exc:
+        log(f"Photo download skip: {exc}")
+        return False
+
+
+def _browse_page(driver, duration_sec: float) -> None:
+    end = time.time() + duration_sec
+    while time.time() < end:
+        action = random.choice(["down", "down", "down", "up", "pause"])
+        if action == "pause":
+            _human_pause(1.5, 4.0)
+        elif action == "up":
+            delta = random.randint(80, 220)
+            driver.execute_script(f"window.scrollBy(0, -{delta});")
+            _human_pause(0.4, 1.2)
+        else:
+            delta = random.randint(120, 450)
+            driver.execute_script(f"window.scrollBy(0, {delta});")
+            _human_pause(0.5, 2.0)
+        if random.random() < 0.08:
+            _human_pause(2.0, 5.0)
 
 
 def _dismiss_consent(driver, country: str, log) -> None:

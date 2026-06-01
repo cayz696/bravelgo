@@ -78,6 +78,8 @@ GEO_PACKS: dict[str, dict] = {
             "kotlin android guide",
         ],
         "consent": ["Accept all", "I agree", "Accept"],
+        "image_queries": ["london skyline", "british pub", "tea and scones", "countryside uk"],
+        "maps_queries": ["coffee shop london", "pub manchester", "cafe edinburgh", "restaurant bristol"],
     },
     "DE": {
         "google": "https://www.google.de",
@@ -96,6 +98,8 @@ GEO_PACKS: dict[str, dict] = {
             "kotlin tutorial deutsch",
         ],
         "consent": ["Alle akzeptieren", "Akzeptieren", "Accept all"],
+        "image_queries": ["berlin skyline", "schloss neuschwanstein", "brot backen", "auto sport"],
+        "maps_queries": ["café berlin", "restaurant münchen", "bäckerei hamburg", "bistro köln"],
     },
     "PL": {
         "google": "https://www.google.pl",
@@ -114,6 +118,8 @@ GEO_PACKS: dict[str, dict] = {
             "kotlin android poradnik",
         ],
         "consent": ["Zaakceptuj wszystko", "Akceptuję", "Accept all"],
+        "image_queries": ["warszawa panorama", "góry tatry", "kot w oknie", "jedzenie polskie"],
+        "maps_queries": ["kawiarnia warszawa", "restauracja kraków", "piekarnia gdańsk"],
     },
     "IT": {
         "google": "https://www.google.it",
@@ -131,6 +137,8 @@ GEO_PACKS: dict[str, dict] = {
             "pubblicare app google play",
         ],
         "consent": ["Accetta tutto", "Accetto", "Accept all"],
+        "image_queries": ["colosseo roma", "costiera amalfitana", "pizza napoletana", "auto rossa"],
+        "maps_queries": ["caffè roma", "ristorante milano", "pizzeria napoli", "bar torino"],
     },
     "NL": {
         "google": "https://www.google.nl",
@@ -147,6 +155,8 @@ GEO_PACKS: dict[str, dict] = {
             "app publiceren google play",
         ],
         "consent": ["Alles accepteren", "Accept all"],
+        "image_queries": ["amsterdam grachten", "tulpen veld", "fiets nederland", "stroopwafel"],
+        "maps_queries": ["café amsterdam", "restaurant rotterdam", "bakkerij utrecht", "koffiebar den haag"],
     },
     "ES": {
         "google": "https://www.google.es",
@@ -163,6 +173,8 @@ GEO_PACKS: dict[str, dict] = {
             "publicar app google play",
         ],
         "consent": ["Aceptar todo", "Accept all"],
+        "image_queries": ["sagrada familia", "playa barcelona", "paella valenciana", "flamenco"],
+        "maps_queries": ["café madrid", "restaurante barcelona", "panadería sevilla"],
     },
     "BR": {
         "google": "https://www.google.com.br",
@@ -179,6 +191,8 @@ GEO_PACKS: dict[str, dict] = {
             "publicar app google play",
         ],
         "consent": ["Aceitar tudo", "Accept all"],
+        "image_queries": ["rio de janeiro praia", "são paulo skyline", "café brasil", "natureza"],
+        "maps_queries": ["café são paulo", "restaurante rio de janeiro", "padaria curitiba"],
     },
     "NO": {
         "google": "https://www.google.no",
@@ -195,6 +209,8 @@ GEO_PACKS: dict[str, dict] = {
             "publisere app google play",
         ],
         "consent": ["Godta alle", "Accept all"],
+        "image_queries": ["oslo fjord", "norsk natur", "kaffe oslo", "nordlys"],
+        "maps_queries": ["kafé oslo", "restaurant bergen", "bakeri trondheim"],
     },
     "UA": {
         "google": "https://www.google.com.ua",
@@ -210,6 +226,27 @@ GEO_PACKS: dict[str, dict] = {
             "опублікувати додаток google play",
         ],
         "consent": ["Прийняти все", "Accept all"],
+        "image_queries": ["київ панорама", "карпати гори", "українська їжа", "котик"],
+        "maps_queries": ["кафе київ", "ресторан львів", "пекарня одеса"],
+    },
+    "NZ": {
+        "google": "https://www.google.co.nz",
+        "sites": [
+            "https://www.stuff.co.nz",
+            "https://www.nzherald.co.nz",
+            "https://www.trademe.co.nz",
+            "https://en.wikipedia.org",
+            "https://www.youtube.com",
+            *DEV_SITES,
+        ],
+        "queries": [
+            "weather auckland tomorrow",
+            "flutter android development",
+            "publish app google play",
+        ],
+        "consent": ["Accept all", "I agree"],
+        "image_queries": ["auckland skyline", "milford sound", "sheep farm nz", "flat white coffee"],
+        "maps_queries": ["cafe auckland", "restaurant wellington", "bakery christchurch", "coffee shop queenstown"],
     },
 }
 
@@ -234,10 +271,17 @@ def pick_queries(country_code: str, lang_mode: str) -> list[str]:
 
 def pick_sites(country_code: str, max_sites: int) -> list[str]:
     import random
-    pack = pack_for_country(country_code)
-    sites = pack["sites"][:]
-    random.shuffle(sites)
-    return sites[:max_sites]
+    from bravelgo.warmup_sites import extended_sites_for_country
+
+    pool = extended_sites_for_country(country_code)
+    random.shuffle(pool)
+    return pool[:max_sites] if max_sites > 0 else pool
+
+
+def site_pool_size(country_code: str) -> int:
+    from bravelgo.warmup_sites import extended_sites_for_country
+
+    return len(extended_sites_for_country(country_code))
 
 
 def google_url(country_code: str) -> str:
@@ -261,3 +305,10 @@ def pick_maps_query(country_code: str) -> str:
     pack = pack_for_country(country_code)
     pool = pack.get("maps_queries") or ["coffee shop", "restaurant", "bakery"]
     return random.choice(pool)
+
+
+def maps_search_url(country_code: str, query: str) -> str:
+    from urllib.parse import quote_plus
+
+    host = google_url(country_code).replace("https://", "").split("/")[0]
+    return f"https://{host}/maps/search/{quote_plus(query)}"

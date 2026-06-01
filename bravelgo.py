@@ -423,7 +423,7 @@ class App(ModernApp):
             self._card(p, "Human-like warmup"),
             "Selenium warmup · robot icon only while script runs.\n"
             "NEVER log into Google during warmup. Use Launch Firefox for Google/Play login.\n"
-            "Recommended: keep «Skip Google» ON — warm up on lemonde, amazon, etc.",
+            "Recommended: «Skip Google» ON — geo sites + Maps (places/photos by proxy country).",
         )
         opts = self._card(p, "Session")
         row = tk.Frame(opts, bg=C.SURFACE)
@@ -454,9 +454,9 @@ class App(ModernApp):
         self.v_warmup_detached = tk.BooleanVar(value=False)
         self.v_warmup_skip_google = tk.BooleanVar(value=True)
         for txt, var in [
-            ("Skip Google (recommended — geo sites only)", self.v_warmup_skip_google),
-            ("Google Images (browse photos)", self.v_warmup_images),
-            ("Google Maps (listing + photos)", self.v_warmup_maps),
+            ("Skip Google search/images (recommended — keeps Maps + geo sites)", self.v_warmup_skip_google),
+            ("Google Images (needs Skip Google OFF)", self.v_warmup_images),
+            ("Google Maps — geo places + view/download 2–3 photos", self.v_warmup_maps),
             ("Background-safe (minimize OK)", self.v_warmup_bg),
             ("Detached — survives BravelGo close", self.v_warmup_detached),
         ]:
