@@ -121,9 +121,9 @@ class App(ModernApp):
     def __init__(self, root: tk.Tk):
         self.root = root
         self.root.title("BravelGo")
-        self.root.minsize(960, 720)
         self.cfg = cfg_load()
         self._init_theme(root)
+        self._apply_window_geometry(root, ratio=0.70)
         self._header(root)
 
         shell = tk.Frame(root, bg=C.BG)
@@ -162,14 +162,6 @@ class App(ModernApp):
         log_wrap = tk.Frame(shell, bg=C.BG)
         log_wrap.grid(row=1, column=0, sticky="nsew", padx=16, pady=(4, 14))
         self.log_box = self._log_panel(log_wrap)
-
-        try:
-            sw, sh = root.winfo_screenwidth(), root.winfo_screenheight()
-            w, h = min(1280, sw - 32), min(1000, sh - 48)
-            x, y = max(0, (sw - w) // 2), max(0, (sh - h) // 2 - 24)
-            root.geometry(f"{w}x{h}+{x}+{y}")
-        except Exception:
-            root.geometry("1280x1000")
 
         if self.cfg.get("fingerprint"):
             self._fp_display(self.cfg["fingerprint"])
@@ -242,7 +234,7 @@ class App(ModernApp):
             ttk.Checkbutton(steps, text=txt, variable=var).grid(row=i // 2, column=i % 2, sticky="w", padx=8, pady=3)
 
         ck = self._card(p, "Consistency check")
-        self.txt_consistency = self._text(ck, height=6, mono=True, readonly=True)
+        self.txt_consistency = self._text(ck, height=10, mono=True, readonly=True)
 
         bf = tk.Frame(p, bg=C.BG)
         bf.pack(fill="x", pady=(0, 8))
@@ -410,14 +402,14 @@ class App(ModernApp):
         threading.Thread(target=self._consistency_check, daemon=True).start()
         self.root.after(
             0,
-            lambda: messagebox.showinfo(
-                "Done",
+            lambda: self.show_info(
+                "Uniquify done",
                 f"Country: {fp.get('country_name', cp['name'])} ({fp.get('country_code', cc)})\n"
                 f"TZ: {fp.get('timezone', '?')}\n"
                 f"Host: {fp['hostname']}\n\n"
-                "Source: active proxy geo (not Profile tab).\n"
-                "Restart Firefox, then reboot VM.\n"
-                "If black screen after reboot: see README recovery steps.",
+                "Source: active proxy geo (recommended).\n"
+                "Profile tab dropdown is preview only.\n\n"
+                "Next: reboot VM, then Proxy → Apply, then Warmup.",
             ),
         )
 
@@ -520,7 +512,7 @@ class App(ModernApp):
     def _warmup_run(self):
         profile = self._active_profile_dir()
         if not profile:
-            self.root.after(0, lambda: messagebox.showerror("Warmup", "No Firefox profile — run Full uniquify first"))
+            self.root.after(0, lambda: self.show_error("Warmup", "No Firefox profile — run Full uniquify first"))
             return
 
         from bravelgo.deps import ensure_warmup_deps
@@ -725,7 +717,7 @@ class App(ModernApp):
     def _proxy_add(self):
         raw = self.ent_proxy.get().strip().replace("socks5://", "")
         if not self._parse_proxy(raw):
-            messagebox.showerror("Error", "IP:PORT:USER:PASS")
+            self.show_error("Error", "IP:PORT:USER:PASS")
             return
         entry = f"socks5://{raw}" if self.combo_ptype.get() == "SOCKS5" else raw
         if entry not in self.cfg["proxies"]:
@@ -761,7 +753,7 @@ class App(ModernApp):
     def _proxy_test(self):
         raw = self._active_proxy_str()
         if not raw:
-            self.root.after(0, lambda: messagebox.showerror("Proxy", "Select proxy"))
+            self.root.after(0, lambda: self.show_error("Proxy", "Select proxy"))
             return
         parts = self._parse_proxy(raw)
         is_socks = raw.startswith("socks5://")
@@ -784,7 +776,7 @@ class App(ModernApp):
     def _proxy_apply(self):
         raw = self._active_proxy_str()
         if not raw:
-            self.root.after(0, lambda: messagebox.showerror("Proxy", "Select proxy"))
+            self.root.after(0, lambda: self.show_error("Proxy", "Select proxy"))
             return
         parts = self._parse_proxy(raw)
         is_socks = raw.startswith("socks5://")

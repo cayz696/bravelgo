@@ -61,11 +61,12 @@ def pick_mono_font(size=10):
     return ("Courier", size)
 
 
-FONT = tk_font(pick_font(10))
-FONT_BOLD = tk_font(pick_font(10, True))
-FONT_SM = tk_font(pick_font(9))
-FONT_LG = tk_font(pick_font(13, True))
-FONT_MONO = tk_font(pick_mono_font(10))
+FONT = tk_font(pick_font(11))
+FONT_BOLD = tk_font(pick_font(11, True))
+FONT_SM = tk_font(pick_font(10))
+FONT_LG = tk_font(pick_font(15, True))
+FONT_MONO = tk_font(pick_mono_font(11))
+FONT_DLG = tk_font(pick_font(12))
 
 
 class ModernApp:
@@ -76,7 +77,7 @@ class ModernApp:
         root.configure(bg=C.BG)
         root.option_add("*Font", FONT)
         try:
-            root.tk.call("tk", "scaling", 1.15)
+            root.tk.call("tk", "scaling", 1.25)
         except Exception:
             pass
 
@@ -88,6 +89,78 @@ class ModernApp:
         style.map("TCombobox", fieldbackground=[("readonly", C.INPUT_BG)])
         style.configure("TSpinbox", fieldbackground=C.INPUT_BG, foreground=C.INPUT_FG)
         style.configure("TCheckbutton", background=C.SURFACE, foreground=C.TEXT2)
+
+    def _screen_size(self) -> tuple[int, int]:
+        root = getattr(self, "root", None)
+        if root is None:
+            return 1280, 800
+        root.update_idletasks()
+        return root.winfo_screenwidth(), root.winfo_screenheight()
+
+    def _apply_window_geometry(self, root: tk.Tk, ratio: float = 0.70) -> None:
+        """Main window ≈ ratio of screen (default 70%)."""
+        sw, sh = self._screen_size()
+        w = max(960, int(sw * ratio))
+        h = max(720, int(sh * ratio))
+        x = max(0, (sw - w) // 2)
+        y = max(0, (sh - h) // 2 - 20)
+        root.geometry(f"{w}x{h}+{x}+{y}")
+        root.minsize(int(sw * 0.55), int(sh * 0.50))
+        self._hint_wrap = int(w * 0.82)
+
+    def _show_dialog(self, title: str, message: str, kind: str = "info") -> None:
+        """Large readable dialog instead of tiny system messagebox."""
+        root = self.root
+        sw, sh = self._screen_size()
+        dlg = tk.Toplevel(root)
+        dlg.title(title)
+        dlg.configure(bg=C.BG)
+        dlg.transient(root)
+        dlg.grab_set()
+
+        dw = max(520, min(int(sw * 0.48), 900))
+        dh = max(280, min(int(sh * 0.42), 620))
+        dlg.geometry(f"{dw}x{dh}+{(sw - dw) // 2}+{(sh - dh) // 2}")
+        dlg.minsize(480, 260)
+
+        bar = tk.Frame(dlg, bg=C.HEADER, padx=16, pady=14)
+        bar.pack(fill="x")
+        accent = C.SUCCESS if kind == "info" else C.DANGER if kind == "error" else C.WARN
+        tk.Label(bar, text=title, font=FONT_LG, fg=C.TEXT, bg=C.HEADER).pack(anchor="w")
+        tk.Frame(bar, bg=accent, height=3).pack(fill="x", pady=(8, 0))
+
+        body = tk.Frame(dlg, bg=C.SURFACE, padx=18, pady=16)
+        body.pack(fill="both", expand=True)
+        body.grid_rowconfigure(0, weight=1)
+        body.grid_columnconfigure(0, weight=1)
+
+        box = scrolledtext.ScrolledText(
+            body, bg=C.INPUT_BG, fg=C.TEXT, font=FONT_DLG,
+            relief="flat", highlightthickness=0, wrap="word",
+            padx=12, pady=10,
+        )
+        box.grid(row=0, column=0, sticky="nsew")
+        box.insert("1.0", message)
+        box.configure(state="disabled")
+
+        foot = tk.Frame(dlg, bg=C.BG, padx=16, pady=12)
+        foot.pack(fill="x")
+        tk.Button(
+            foot, text="OK", command=dlg.destroy,
+            bg=C.ACCENT, fg=C.ACCENT_TEXT, activebackground=C.ACCENT_DIM,
+            relief="flat", padx=28, pady=10, font=FONT_BOLD, cursor="hand2",
+        ).pack(side="right")
+
+        dlg.bind("<Return>", lambda _e: dlg.destroy())
+        dlg.bind("<Escape>", lambda _e: dlg.destroy())
+        dlg.protocol("WM_DELETE_WINDOW", dlg.destroy)
+        dlg.wait_window()
+
+    def show_info(self, title: str, message: str) -> None:
+        self.root.after(0, lambda: self._show_dialog(title, message, "info"))
+
+    def show_error(self, title: str, message: str) -> None:
+        self.root.after(0, lambda: self._show_dialog(title, message, "error"))
 
     def _header(self, parent) -> tk.Frame:
         bar = tk.Frame(parent, bg=C.HEADER, height=64)
@@ -257,5 +330,6 @@ class ModernApp:
         return lbl
 
     def _hint(self, parent, text: str):
+        wrap = getattr(self, "_hint_wrap", 900)
         tk.Label(parent, text=text, font=FONT_SM, fg=C.TEXT3, bg=C.SURFACE,
-                 justify="left", wraplength=760).pack(fill="x", pady=(0, 8))
+                 justify="left", wraplength=wrap).pack(fill="x", pady=(0, 8))
