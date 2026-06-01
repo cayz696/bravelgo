@@ -64,7 +64,65 @@ def _unlock_profile(profile_dir: Path) -> None:
 def _system_firefox(log) -> str | None:
     from bravelgo.ff_profile import resolve_firefox_binary
 
-    return resolve_firefox_binary(log)
+    return resolve_firefox_binary(log, install_if_missing=True)
+
+
+def _firefox_options(profile_dir: Path, bridge_port: int, cp: dict, binary: str | None):
+    from selenium.webdriver.firefox.options import Options
+
+    opts = Options()
+    if binary:
+        opts.binary_location = binary
+    opts.set_preference("browser.shell.checkDefaultBrowser", False)
+    opts.set_preference("browser.startup.page", 0)
+    opts.set_preference("network.proxy.type", 1)
+    opts.set_preference("network.proxy.http", "127.0.0.1")
+    opts.set_preference("network.proxy.http_port", bridge_port)
+    opts.set_preference("network.proxy.ssl", "127.0.0.1")
+    opts.set_preference("network.proxy.ssl_port", bridge_port)
+    opts.set_preference("network.proxy.share_proxy_settings", True)
+    opts.set_preference("network.proxy.no_proxies_on", "localhost, 127.0.0.1")
+    opts.set_preference("media.peerconnection.enabled", False)
+    opts.set_preference("intl.accept_languages", cp["lang_full"])
+    opts.set_preference("dom.webdriver.enabled", False)
+    opts.set_preference("dom.min_background_timeout_value", 4)
+    opts.set_preference("dom.timeout.enable_budget_timer_throttling", False)
+    opts.add_argument("-profile")
+    opts.add_argument(str(profile_dir))
+    opts.add_argument("-no-remote")
+    return opts
+
+
+def _build_driver(profile_dir: Path, firefox_bin: str, gecko: str, bridge_port: int, cp: dict, log):
+    from selenium import webdriver
+    from selenium.webdriver.firefox.service import Service
+
+    service = Service(executable_path=gecko)
+    attempts: list[str | None] = [firefox_bin, None]
+    seen: set[str | None] = set()
+    last_exc: Exception | None = None
+
+    log("Starting Firefox (Selenium)…")
+    for binary in attempts:
+        if binary in seen:
+            continue
+        seen.add(binary)
+        label = binary or "(system PATH via geckodriver)"
+        log(f"Try Firefox binary: {label}")
+        try:
+            opts = _firefox_options(profile_dir, bridge_port, cp, binary)
+            driver = webdriver.Firefox(service=service, options=opts)
+            driver.set_page_load_timeout(60)
+            driver.implicitly_wait(4)
+            log(f"Firefox OK · {label}")
+            return driver
+        except Exception as exc:
+            last_exc = exc
+            log(f"Launch failed ({label}): {exc}")
+
+    if last_exc:
+        raise last_exc
+    raise RuntimeError("Firefox launch failed")
 
 
 def _geckodriver(log) -> str | None:
@@ -84,40 +142,6 @@ def _ensure_selenium(log) -> bool:
     from bravelgo.pip_install import ensure_import
 
     return ensure_import("selenium", log=log)
-
-
-def _build_driver(profile_dir: Path, firefox_bin: str, gecko: str, bridge_port: int, cp: dict, log):
-    from selenium import webdriver
-    from selenium.webdriver.firefox.options import Options
-    from selenium.webdriver.firefox.service import Service
-
-    opts = Options()
-    opts.binary_location = firefox_bin
-    opts.set_preference("browser.shell.checkDefaultBrowser", False)
-    opts.set_preference("browser.startup.page", 0)
-    opts.set_preference("network.proxy.type", 1)
-    opts.set_preference("network.proxy.http", "127.0.0.1")
-    opts.set_preference("network.proxy.http_port", bridge_port)
-    opts.set_preference("network.proxy.ssl", "127.0.0.1")
-    opts.set_preference("network.proxy.ssl_port", bridge_port)
-    opts.set_preference("network.proxy.share_proxy_settings", True)
-    opts.set_preference("network.proxy.no_proxies_on", "localhost, 127.0.0.1")
-    opts.set_preference("media.peerconnection.enabled", False)
-    opts.set_preference("intl.accept_languages", cp["lang_full"])
-    opts.set_preference("dom.webdriver.enabled", False)
-    opts.set_preference("dom.min_background_timeout_value", 4)
-    opts.set_preference("dom.timeout.enable_budget_timer_throttling", False)
-
-    opts.add_argument("-profile")
-    opts.add_argument(str(profile_dir))
-    opts.add_argument("-no-remote")
-
-    service = Service(executable_path=gecko)
-    log("Starting Firefox (Selenium)…")
-    driver = webdriver.Firefox(service=service, options=opts)
-    driver.set_page_load_timeout(60)
-    driver.implicitly_wait(4)
-    return driver
 
 
 def run_warmup(

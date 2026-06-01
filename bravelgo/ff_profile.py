@@ -105,41 +105,95 @@ def write_user_js(profile_dir: str, fp: dict, real_user: str, proxy_enabled: boo
     log(f"user.js → {os.path.basename(profile_dir)}")
 
 
-def resolve_firefox_binary(log=None) -> str | None:
-    """Real Firefox ELF path — Selenium rejects /usr/bin/firefox shell wrapper."""
+def resolve_firefox_binary(log=None, install_if_missing: bool = False) -> str | None:
+    """Real Firefox binary for Selenium (not /usr/bin/firefox shell wrapper)."""
+    import glob
     import os
-    import re
     import shutil
+    import subprocess
 
-    candidates: list[str] = []
-    for path in (
-        "/usr/lib/firefox/firefox",
-        "/usr/lib/firefox-esr/firefox",
-        "/usr/lib/firefox/firefox-bin",
-    ):
-        candidates.append(path)
-    which = shutil.which("firefox")
-    if which:
-        candidates.append(which)
-    candidates.extend(("/usr/bin/firefox", "/usr/bin/firefox-esr"))
-
-    seen: set[str] = set()
-    for raw in candidates:
-        if not raw or raw in seen:
-            continue
-        seen.add(raw)
-        resolved = _resolve_firefox_path(raw)
-        if resolved:
+    for path in _firefox_candidates():
+        resolved = _resolve_firefox_path(path)
+        if resolved and _verify_firefox_binary(resolved, log):
             if log:
-                if os.path.realpath(raw) != os.path.realpath(resolved):
-                    log(f"Firefox: {raw} → {resolved}")
+                if os.path.realpath(path) != os.path.realpath(resolved):
+                    log(f"Firefox: {path} → {resolved}")
                 else:
                     log(f"System Firefox: {resolved}")
             return resolved
 
+    if install_if_missing and hasattr(os, "geteuid") and os.geteuid() == 0:
+        if log:
+            log("Firefox not found — installing via apt…")
+        subprocess.run(["apt-get", "update", "-qq"], check=False)
+        subprocess.run(
+            ["apt-get", "install", "-y", "firefox", "firefox-geckodriver"],
+            check=False,
+        )
+        for path in _firefox_candidates():
+            resolved = _resolve_firefox_path(path)
+            if resolved and _verify_firefox_binary(resolved, log):
+                if log:
+                    log(f"Firefox installed: {resolved}")
+                return resolved
+
     if log:
-        log("ERROR: sudo apt install firefox  (not snap)")
+        if shutil.which("firefox") and "/snap/" in (shutil.which("firefox") or ""):
+            log("ERROR: snap Firefox — run: sudo snap remove firefox && sudo apt install firefox")
+        else:
+            log("ERROR: sudo apt install firefox firefox-geckodriver")
     return None
+
+
+def _firefox_candidates() -> list[str]:
+    import glob
+    import shutil
+
+    out: list[str] = []
+    for pattern in (
+        "/usr/lib/firefox/firefox",
+        "/usr/lib/firefox-esr/firefox",
+        "/usr/lib/firefox/firefox-bin",
+        "/usr/lib64/firefox/firefox",
+        "/opt/firefox/firefox",
+        "/opt/firefox-esr/firefox",
+        "/snap/firefox/current/usr/lib/firefox/firefox",
+    ):
+        out.append(pattern)
+    for match in sorted(glob.glob("/usr/lib/firefox*/firefox")):
+        out.append(match)
+    which = shutil.which("firefox")
+    if which:
+        out.append(which)
+    out.extend(("/usr/bin/firefox", "/usr/bin/firefox-esr"))
+    seen: set[str] = set()
+    ordered: list[str] = []
+    for item in out:
+        if item and item not in seen:
+            seen.add(item)
+            ordered.append(item)
+    return ordered
+
+
+def _verify_firefox_binary(path: str, log=None) -> bool:
+    import subprocess
+
+    try:
+        proc = subprocess.run(
+            [path, "--version"],
+            capture_output=True,
+            text=True,
+            timeout=20,
+        )
+        text = f"{proc.stdout} {proc.stderr}".lower()
+        ok = proc.returncode == 0 and "mozilla firefox" in text
+        if not ok and log:
+            log(f"Skip invalid binary {path}: {(proc.stdout or proc.stderr).strip()[:80]}")
+        return ok
+    except Exception as exc:
+        if log:
+            log(f"Skip {path}: {exc}")
+        return False
 
 
 def _is_elf_executable(path: Path) -> bool:
@@ -194,7 +248,7 @@ def _resolve_firefox_path(raw: str) -> str | None:
 
     for match in re.finditer(r"([/\w.-]+/firefox(?:-bin)?)", text):
         cp = Path(match.group(1))
-        if _is_elf_executable(cp):
+        if cp.is_file() and (_is_elf_executable(cp) or _verify_firefox_binary(str(cp))):
             return str(cp.resolve())
 
     return None
