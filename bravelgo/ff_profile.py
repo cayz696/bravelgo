@@ -211,22 +211,36 @@ def _is_elf_executable(path: Path) -> bool:
         return False
 
 
+def _is_snap_path(path: str) -> bool:
+    low = path.lower()
+    return "/snap/" in low or low.endswith("/snap") or "/usr/bin/snap" in low
+
+
 def _resolve_firefox_path(raw: str) -> str | None:
     import os
     import re
+
+    if _is_snap_path(raw):
+        return None
 
     p = Path(raw)
     if not p.exists():
         return None
 
     if _is_elf_executable(p):
-        return str(p.resolve())
+        resolved = str(p.resolve())
+        return None if _is_snap_path(resolved) else resolved
 
     real = Path(os.path.realpath(raw))
     if real != p and _is_elf_executable(real):
-        return str(real)
+        resolved = str(real)
+        return None if _is_snap_path(resolved) else resolved
 
     if not p.is_file():
+        return None
+
+    # /usr/bin/firefox → /usr/bin/snap wrapper after snap install — not a real browser
+    if real.name == "snap" or "snap" in real.parts:
         return None
 
     try:
@@ -253,8 +267,9 @@ def _resolve_firefox_path(raw: str) -> str | None:
 
     for match in re.finditer(r"([/\w.-]+/firefox(?:-bin)?)", text):
         cp = Path(match.group(1))
-        if cp.is_file() and (_is_elf_executable(cp) or _verify_firefox_binary(str(cp))):
-            return str(cp.resolve())
+        if cp.is_file() and not _is_snap_path(str(cp)):
+            if _is_elf_executable(cp) or _verify_firefox_binary(str(cp)):
+                return str(cp.resolve())
 
     return None
 

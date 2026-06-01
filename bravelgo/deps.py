@@ -15,7 +15,10 @@ GECKODRIVER_PATHS = ("/usr/local/bin/geckodriver", "/usr/bin/geckodriver")
 
 
 def is_snap_path(path: str | None) -> bool:
-    return bool(path and "/snap/" in path)
+    if not path:
+        return False
+    low = path.lower()
+    return "/snap/" in low or low.endswith("/snap") or "/usr/bin/snap" in low
 
 
 def _deb_firefox_ok() -> bool:
@@ -33,12 +36,21 @@ def _user_import_ok(real_user: str, module: str) -> bool:
     return proc.returncode == 0
 
 
-def _apt_install(packages: list[str], log) -> bool:
+def _apt_install(packages: list[str], log, allow_downgrades: bool = True) -> bool:
     if not packages:
         return True
     log(f"apt install {' '.join(packages)}…")
+    env = {**os.environ, "DEBIAN_FRONTEND": "noninteractive"}
     _run(["apt-get", "update", "-qq"])
-    proc = _run(["apt-get", "install", "-y", *packages])
+    flags = ["-y"]
+    if allow_downgrades:
+        flags.append("--allow-downgrades")
+    proc = subprocess.run(
+        ["apt-get", "install", *flags, *packages],
+        capture_output=True,
+        text=True,
+        env=env,
+    )
     if proc.returncode != 0:
         for line in (proc.stderr or proc.stdout or "").splitlines():
             if line.strip():
@@ -48,31 +60,51 @@ def _apt_install(packages: list[str], log) -> bool:
 
 
 def reinstall_firefox(log) -> bool:
-    """Deb Firefox — snap breaks Selenium; install Mozilla apt build if needed."""
+    """Deb Firefox — snap breaks Selenium; use Mozilla apt repo."""
     log("Firefox: removing snap (Selenium incompatible)…")
     _run(["snap", "remove", "firefox"], check=False)
     _run(["snap", "remove", "firefox", "--purge"], check=False)
 
-    if not _deb_firefox_ok():
-        if not _apt_install(["firefox"], log):
-            log("apt firefox failed — trying Mozilla official repo…")
-        if not _deb_firefox_ok():
-            _install_firefox_mozilla_apt(log)
-
-    _run(["apt-get", "install", "-y", "--reinstall", "firefox"], check=False)
+    _ensure_mozilla_apt_repo(log)
 
     if _deb_firefox_ok():
-        log(f"Firefox OK: /usr/lib/firefox/firefox")
+        log("Firefox OK: /usr/lib/firefox/firefox")
         return True
 
-    log("ERROR: deb Firefox missing — snap removed but install failed")
-    log("Manual: sudo snap remove firefox && sudo apt install firefox")
+    log("Installing deb Firefox from Mozilla repo…")
+    _run(
+        ["apt-get", "remove", "-y", "firefox"],
+        capture_output=True,
+        text=True,
+        env={**os.environ, "DEBIAN_FRONTEND": "noninteractive"},
+    )
+    if not _apt_install(["firefox"], log):
+        log("Retry firefox with force options…")
+        subprocess.run(
+            [
+                "apt-get", "install", "-y", "--allow-downgrades",
+                "-o", "Dpkg::Options::=--force-confnew",
+                "firefox",
+            ],
+            capture_output=True,
+            text=True,
+            env={**os.environ, "DEBIAN_FRONTEND": "noninteractive"},
+        )
+
+    if _deb_firefox_ok():
+        log("Firefox OK: /usr/lib/firefox/firefox")
+        return True
+
+    log("ERROR: deb Firefox still missing after install")
+    log("Run in terminal:")
+    log("  sudo snap remove firefox")
+    log("  sudo apt update && sudo apt install -y --allow-downgrades firefox")
     return False
 
 
-def _install_firefox_mozilla_apt(log) -> None:
-    """Official Mozilla APT repo (deb package, not snap)."""
-    log("Adding packages.mozilla.org…")
+def _ensure_mozilla_apt_repo(log) -> None:
+    """Official Mozilla APT repo — real deb Firefox, not Ubuntu snap stub."""
+    log("Mozilla apt repo…")
     keyring = Path("/etc/apt/keyrings/packages.mozilla.org.asc")
     keyring.parent.mkdir(parents=True, exist_ok=True)
     try:
@@ -84,19 +116,16 @@ def _install_firefox_mozilla_apt(log) -> None:
         log(f"Mozilla key download failed: {exc}")
         return
 
-    src = Path("/etc/apt/sources.list.d/mozilla.list")
-    src.write_text(
+    Path("/etc/apt/sources.list.d/mozilla.list").write_text(
         "deb [signed-by=/etc/apt/keyrings/packages.mozilla.org.asc] "
         "https://packages.mozilla.org/apt mozilla main\n",
         encoding="utf-8",
     )
-    prefs = Path("/etc/apt/preferences.d/mozilla-firefox")
-    if not prefs.exists():
-        prefs.write_text(
-            "Package: firefox*\nPin: origin packages.mozilla.org\nPin-Priority: 1000\n",
-            encoding="utf-8",
-        )
-    _apt_install(["firefox"], log)
+    Path("/etc/apt/preferences.d/mozilla-firefox").write_text(
+        "Package: firefox*\nPin: origin packages.mozilla.org\nPin-Priority: 1000\n",
+        encoding="utf-8",
+    )
+    _run(["apt-get", "update", "-qq"])
 
 
 def install_geckodriver(log) -> str | None:
@@ -226,7 +255,7 @@ def ensure_warmup_deps(log, real_user: str) -> bool:
 
     ff = resolve_firefox_binary(log)
     if is_snap_path(ff) or not _deb_firefox_ok():
-        log("Snap Firefox detected — installing deb package…")
+        log("Need deb Firefox (not snap)…")
         if not reinstall_firefox(log):
             return False
     elif ff:
