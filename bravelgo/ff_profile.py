@@ -153,7 +153,7 @@ def resolve_firefox_binary(log=None, install_if_missing: bool = False) -> str | 
     return None
 
 
-def launch_profile(real_user: str, profile_dir: str, log) -> None:
+def _firefox_candidates() -> list[str]:
     import glob
     import shutil
 
