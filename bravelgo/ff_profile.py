@@ -4,6 +4,7 @@ from __future__ import annotations
 import os
 import re
 import subprocess
+from pathlib import Path
 
 BRIDGE_PORT = 8118
 
@@ -102,6 +103,101 @@ def write_user_js(profile_dir: str, fp: dict, real_user: str, proxy_enabled: boo
         f.write("\n".join(lines) + "\n")
     run(f"chown {real_user}:{real_user} '{path}'")
     log(f"user.js → {os.path.basename(profile_dir)}")
+
+
+def resolve_firefox_binary(log=None) -> str | None:
+    """Real Firefox ELF path — Selenium rejects /usr/bin/firefox shell wrapper."""
+    import os
+    import re
+    import shutil
+
+    candidates: list[str] = []
+    for path in (
+        "/usr/lib/firefox/firefox",
+        "/usr/lib/firefox-esr/firefox",
+        "/usr/lib/firefox/firefox-bin",
+    ):
+        candidates.append(path)
+    which = shutil.which("firefox")
+    if which:
+        candidates.append(which)
+    candidates.extend(("/usr/bin/firefox", "/usr/bin/firefox-esr"))
+
+    seen: set[str] = set()
+    for raw in candidates:
+        if not raw or raw in seen:
+            continue
+        seen.add(raw)
+        resolved = _resolve_firefox_path(raw)
+        if resolved:
+            if log:
+                if os.path.realpath(raw) != os.path.realpath(resolved):
+                    log(f"Firefox: {raw} → {resolved}")
+                else:
+                    log(f"System Firefox: {resolved}")
+            return resolved
+
+    if log:
+        log("ERROR: sudo apt install firefox  (not snap)")
+    return None
+
+
+def _is_elf_executable(path: Path) -> bool:
+    try:
+        if not path.is_file() or not os.access(path, os.X_OK):
+            return False
+        with path.open("rb") as fh:
+            return fh.read(4) == b"\x7fELF"
+    except OSError:
+        return False
+
+
+def _resolve_firefox_path(raw: str) -> str | None:
+    import os
+    import re
+
+    p = Path(raw)
+    if not p.exists():
+        return None
+
+    if _is_elf_executable(p):
+        return str(p.resolve())
+
+    real = Path(os.path.realpath(raw))
+    if real != p and _is_elf_executable(real):
+        return str(real)
+
+    if not p.is_file():
+        return None
+
+    try:
+        text = p.read_text(encoding="utf-8", errors="ignore")
+    except OSError:
+        return None
+
+    moz_dist = ""
+    moz_app = ""
+    for line in text.splitlines():
+        line = line.strip()
+        if line.startswith("MOZ_DIST="):
+            moz_dist = line.split("=", 1)[1].strip().strip("'\"")
+        elif line.startswith("MOZ_APP="):
+            moz_app = line.split("=", 1)[1].strip().strip("'\"")
+
+    for candidate in (moz_app, f"{moz_dist}/firefox" if moz_dist else ""):
+        if not candidate:
+            continue
+        expanded = candidate.replace("$MOZ_DIST", moz_dist).replace('"', "").replace("'", "")
+        cp = Path(expanded)
+        if _is_elf_executable(cp):
+            return str(cp.resolve())
+
+    for match in re.finditer(r"([/\w.-]+/firefox(?:-bin)?)", text):
+        cp = Path(match.group(1))
+        if _is_elf_executable(cp):
+            return str(cp.resolve())
+
+    return None
 
 
 def launch_profile(real_user: str, profile_dir: str, log) -> None:

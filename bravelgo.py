@@ -121,14 +121,19 @@ class App(ModernApp):
     def __init__(self, root: tk.Tk):
         self.root = root
         self.root.title("BravelGo")
-        self.root.geometry("940x880")
-        self.root.minsize(900, 820)
+        self.root.minsize(960, 720)
         self.cfg = cfg_load()
         self._init_theme(root)
         self._header(root)
 
-        body = tk.Frame(root, bg=C.BG)
-        body.pack(fill="both", expand=True)
+        shell = tk.Frame(root, bg=C.BG)
+        shell.pack(fill="both", expand=True)
+        shell.grid_rowconfigure(0, weight=3)
+        shell.grid_rowconfigure(1, weight=2)
+        shell.grid_columnconfigure(0, weight=1)
+
+        body = tk.Frame(shell, bg=C.BG)
+        body.grid(row=0, column=0, sticky="nsew", padx=16, pady=(8, 4))
         _, frames = self._tab_bar(
             body,
             [
@@ -154,9 +159,17 @@ class App(ModernApp):
         self._build_disk()
         self._build_warmup()
 
-        log_wrap = tk.Frame(root, bg=C.BG)
-        log_wrap.pack(fill="x", padx=16, pady=(0, 14))
+        log_wrap = tk.Frame(shell, bg=C.BG)
+        log_wrap.grid(row=1, column=0, sticky="nsew", padx=16, pady=(4, 14))
         self.log_box = self._log_panel(log_wrap)
+
+        try:
+            sw, sh = root.winfo_screenwidth(), root.winfo_screenheight()
+            w, h = min(1280, sw - 32), min(1000, sh - 48)
+            x, y = max(0, (sw - w) // 2), max(0, (sh - h) // 2 - 24)
+            root.geometry(f"{w}x{h}+{x}+{y}")
+        except Exception:
+            root.geometry("1280x1000")
 
         if self.cfg.get("fingerprint"):
             self._fp_display(self.cfg["fingerprint"])

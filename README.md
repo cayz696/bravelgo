@@ -2,20 +2,28 @@
 
 Variant A + Modern UI | Ubuntu 24.04 | UTM
 
-## Install in VM
+## Install in VM (first time)
 
 ```bash
-# First time — clone from GitHub
 git clone https://github.com/cayz696/bravelgo.git ~/Desktop/google
 cd ~/Desktop/google
-sudo apt install -y python3 python3-tk curl
-pip3 install playwright --break-system-packages
-python3 -m playwright install firefox
-sudo python3 bravelgo.py
 
-# Update later (replace files)
+sudo apt update
+sudo apt install -y git curl firefox firefox-geckodriver \
+  python3 python3-pip python3-tk jq
+
+sudo python3 -m pip install selenium PySocks --break-system-packages
+sudo python3 bravelgo.py
+```
+
+> On a bare Ubuntu, `python3-pip` is required — without it warmup fails with `No such file or directory: pip3`.
+
+## Update later
+
+```bash
 cd ~/Desktop/google
 git pull
+sudo python3 bravelgo.py
 ```
 
 ## Structure
@@ -24,30 +32,21 @@ git pull
 google/
   bravelgo.py           ← run this
   bravelgo/
-    ui_theme.py         ← modern dark UI
-    countries.py        ← country profiles + fingerprint
-    proxy_geo.py        ← geo lookup (PySocks) + bridge
-    ff_profile.py       ← Firefox profile (user.js only)
+    core/warmup.py      ← Selenium warmup (firefox-geckodriver)
+    proxy_geo.py        ← geo lookup (PySocks) + bridge 127.0.0.1:8118
+    ff_profile.py       ← Firefox profile (user.js)
 ```
-
-## Features
-
-- **Full uniquify** — MAC, machine-id, locale/TZ from proxy country, IPv6 off, new FF profile
-- **Variant A** — honest Linux Firefox (no fake UA/GPU)
-- **Proxy** — HTTP + SOCKS5 via local bridge `127.0.0.1:8118`
-- **Warmup** — Playwright, geo sites, Google Images/Maps, background-safe
-- **Registry** — `~/MacFolder/.bravelgo-registry.json` avoids ID reuse
 
 ## Workflow
 
 1. UTM: clone VM → new MAC
-2. Save proxy → **Test**
-3. **Full uniquify**
-4. **Run check** → all green
-5. Reboot VM
-6. **Launch Firefox**
-7. Warm up → Google login
+2. Disk → Mount MacFolder
+3. Proxy → Save → Test → Apply
+4. Full uniquify → Run check → reboot
+5. Warmup ×3–5 (**Skip Google ON**)
+6. Launch Firefox → Google / Play Console
 
 ## Config
 
-`~/.bravelgo.json` — proxies, fingerprint, ff_profile path
+`~/.bravelgo.json` — proxies, fingerprint, ff_profile path  
+`~/MacFolder/.bravelgo-registry.json` — cross-clone ID ledger

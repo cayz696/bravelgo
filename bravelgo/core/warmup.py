@@ -62,16 +62,9 @@ def _unlock_profile(profile_dir: Path) -> None:
 
 
 def _system_firefox(log) -> str | None:
-    for candidate in ("/usr/bin/firefox", "/usr/bin/firefox-esr"):
-        if Path(candidate).is_file():
-            log(f"System Firefox: {candidate}")
-            return candidate
-    found = shutil.which("firefox")
-    if found:
-        log(f"System Firefox: {found}")
-        return found
-    log("ERROR: sudo apt install firefox")
-    return None
+    from bravelgo.ff_profile import resolve_firefox_binary
+
+    return resolve_firefox_binary(log)
 
 
 def _geckodriver(log) -> str | None:
@@ -88,21 +81,9 @@ def _geckodriver(log) -> str | None:
 
 
 def _ensure_selenium(log) -> bool:
-    try:
-        import selenium  # noqa: F401
-        return True
-    except ImportError:
-        log("Installing selenium…")
-        subprocess.run(
-            ["pip3", "install", "selenium", "--break-system-packages", "-q"],
-            check=False,
-        )
-        try:
-            import selenium  # noqa: F401
-            return True
-        except ImportError:
-            log("ERROR: pip3 install selenium --break-system-packages")
-            return False
+    from bravelgo.pip_install import ensure_import
+
+    return ensure_import("selenium", log=log)
 
 
 def _build_driver(profile_dir: Path, firefox_bin: str, gecko: str, bridge_port: int, cp: dict, log):

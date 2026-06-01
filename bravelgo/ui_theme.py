@@ -228,13 +228,24 @@ class ModernApp:
         return t
 
     def _log_panel(self, parent) -> scrolledtext.ScrolledText:
-        card = self._card(parent, "Console")
+        outer = tk.Frame(parent, bg=C.BORDER, padx=1, pady=1)
+        outer.pack(fill="both", expand=True)
+
+        inner = tk.Frame(outer, bg=C.SURFACE, padx=12, pady=10)
+        inner.pack(fill="both", expand=True)
+        inner.grid_rowconfigure(1, weight=1)
+        inner.grid_columnconfigure(0, weight=1)
+
+        tk.Label(inner, text="CONSOLE", font=FONT_SM, fg=C.TEXT3,
+                 bg=C.SURFACE, anchor="w").grid(row=0, column=0, sticky="ew", pady=(0, 6))
+
         log = scrolledtext.ScrolledText(
-            card, height=7, bg=C.LOG_BG, fg=C.LOG_FG,
+            inner, height=10, bg=C.LOG_BG, fg=C.LOG_FG,
             insertbackground=C.LOG_FG, relief="flat",
             highlightthickness=0, font=FONT_MONO,
+            wrap="none",
         )
-        log.pack(fill="x", pady=(0, 0))
+        log.grid(row=1, column=0, sticky="nsew")
         return log
 
     def _info_row(self, parent, label: str, value: str = "—") -> tk.Label:

@@ -16,13 +16,11 @@ def run(cmd: str) -> tuple[int, str]:
     return r.returncode, (r.stdout + r.stderr).strip()
 
 
-def ensure_pysocks() -> None:
-    try:
-        import socks  # noqa: F401
-        return
-    except ImportError:
-        run("pip3 install PySocks --break-system-packages -q")
-        import socks  # noqa: F401
+def ensure_pysocks(log=None) -> None:
+    from bravelgo.pip_install import ensure_import
+
+    if not ensure_import("socks", pip_name="PySocks", log=log):
+        raise ImportError("PySocks missing — sudo apt install python3-pip")
 
 
 def _parse_http_json(raw: bytes) -> dict:
@@ -108,8 +106,8 @@ import asyncio, logging
 try:
     import socks
 except ImportError:
-    import subprocess
-    subprocess.run(["pip3","install","PySocks","--break-system-packages","-q"], check=False)
+    import sys, subprocess
+    subprocess.run([sys.executable, "-m", "pip", "install", "PySocks", "--break-system-packages", "-q"], check=False)
     import socks
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(message)s",
