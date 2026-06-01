@@ -505,6 +505,13 @@ class App(ModernApp):
         if not profile:
             self.root.after(0, lambda: messagebox.showerror("Warmup", "No Firefox profile — run Full uniquify first"))
             return
+
+        from bravelgo.ff_profile import ensure_warmup_deps
+
+        if not ensure_warmup_deps(self.log):
+            self.set_status("Warmup blocked — install deps", "idle")
+            return
+
         _, bridge = _run("systemctl is-active bravelgo-bridge 2>/dev/null")
         if bridge.strip() != "active":
             self.log("⚠ Bridge not active — apply proxy first (Proxy tab)")

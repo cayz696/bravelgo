@@ -106,21 +106,26 @@ def write_user_js(profile_dir: str, fp: dict, real_user: str, proxy_enabled: boo
 
 
 def resolve_firefox_binary(log=None, install_if_missing: bool = False) -> str | None:
-    """Real Firefox binary for Selenium (not /usr/bin/firefox shell wrapper)."""
-    import glob
+    """Prefer real ELF binary; fallback to firefox launcher on PATH."""
     import os
     import shutil
     import subprocess
 
     for path in _firefox_candidates():
         resolved = _resolve_firefox_path(path)
-        if resolved and _verify_firefox_binary(resolved, log):
+        if resolved:
             if log:
                 if os.path.realpath(path) != os.path.realpath(resolved):
                     log(f"Firefox: {path} → {resolved}")
                 else:
                     log(f"System Firefox: {resolved}")
             return resolved
+
+    launcher = shutil.which("firefox")
+    if launcher and Path(launcher).exists():
+        if log:
+            log(f"Firefox launcher: {launcher}")
+        return launcher
 
     if install_if_missing and hasattr(os, "geteuid") and os.geteuid() == 0:
         if log:
@@ -132,17 +137,69 @@ def resolve_firefox_binary(log=None, install_if_missing: bool = False) -> str | 
         )
         for path in _firefox_candidates():
             resolved = _resolve_firefox_path(path)
-            if resolved and _verify_firefox_binary(resolved, log):
+            if resolved:
                 if log:
                     log(f"Firefox installed: {resolved}")
                 return resolved
+        launcher = shutil.which("firefox")
+        if launcher:
+            if log:
+                log(f"Firefox launcher: {launcher}")
+            return launcher
 
     if log:
-        if shutil.which("firefox") and "/snap/" in (shutil.which("firefox") or ""):
+        if launcher and "/snap/" in launcher:
             log("ERROR: snap Firefox — run: sudo snap remove firefox && sudo apt install firefox")
         else:
             log("ERROR: sudo apt install firefox firefox-geckodriver")
     return None
+
+
+def ensure_warmup_deps(log) -> bool:
+    """Install Firefox/geckodriver/selenium — call from sudo bravelgo before warmup."""
+    import os
+    import shutil
+    import subprocess
+    from pathlib import Path
+
+    if os.geteuid() != 0:
+        return True
+
+    need: list[str] = []
+    has_ff = any(Path(p).is_file() for p in ("/usr/lib/firefox/firefox", "/usr/lib/firefox-esr/firefox"))
+    if not has_ff and not shutil.which("firefox"):
+        need.append("firefox")
+    if not Path("/usr/bin/geckodriver").is_file() and not shutil.which("geckodriver"):
+        need.append("firefox-geckodriver")
+
+    if need:
+        log(f"Installing {' '.join(need)}…")
+        subprocess.run(["apt-get", "update", "-qq"], check=False)
+        proc = subprocess.run(
+            ["apt-get", "install", "-y", *need],
+            capture_output=True,
+            text=True,
+        )
+        if proc.returncode != 0:
+            tail = (proc.stderr or proc.stdout or "").strip().splitlines()
+            if tail:
+                log(tail[-1][:120])
+
+    from bravelgo.pip_install import ensure_import
+
+    if not ensure_import("selenium", log=log):
+        return False
+
+    ff = resolve_firefox_binary(log)
+    gecko = shutil.which("geckodriver") or "/usr/bin/geckodriver"
+    if not ff:
+        log("ERROR: Firefox missing — sudo apt install firefox")
+        return False
+    if not Path(gecko).is_file() and not shutil.which("geckodriver"):
+        log("ERROR: geckodriver missing — sudo apt install firefox-geckodriver")
+        return False
+    log(f"Warmup deps OK · geckodriver={gecko}")
+    return True
 
 
 def _firefox_candidates() -> list[str]:
@@ -176,6 +233,7 @@ def _firefox_candidates() -> list[str]:
 
 
 def _verify_firefox_binary(path: str, log=None) -> bool:
+    """Optional sanity check — never used as hard gate."""
     import subprocess
 
     try:
@@ -186,13 +244,8 @@ def _verify_firefox_binary(path: str, log=None) -> bool:
             timeout=20,
         )
         text = f"{proc.stdout} {proc.stderr}".lower()
-        ok = proc.returncode == 0 and "mozilla firefox" in text
-        if not ok and log:
-            log(f"Skip invalid binary {path}: {(proc.stdout or proc.stderr).strip()[:80]}")
-        return ok
-    except Exception as exc:
-        if log:
-            log(f"Skip {path}: {exc}")
+        return proc.returncode == 0 and "firefox" in text
+    except Exception:
         return False
 
 

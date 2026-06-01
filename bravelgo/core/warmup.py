@@ -64,7 +64,17 @@ def _unlock_profile(profile_dir: Path) -> None:
 def _system_firefox(log) -> str | None:
     from bravelgo.ff_profile import resolve_firefox_binary
 
-    return resolve_firefox_binary(log, install_if_missing=True)
+    return resolve_firefox_binary(log)
+
+
+def _elf_binary(path: str | None) -> bool:
+    if not path:
+        return False
+    try:
+        with open(path, "rb") as fh:
+            return fh.read(4) == b"\x7fELF"
+    except OSError:
+        return False
 
 
 def _firefox_options(profile_dir: Path, bridge_port: int, cp: dict, binary: str | None):
@@ -98,7 +108,12 @@ def _build_driver(profile_dir: Path, firefox_bin: str, gecko: str, bridge_port: 
     from selenium.webdriver.firefox.service import Service
 
     service = Service(executable_path=gecko)
-    attempts: list[str | None] = [firefox_bin, None]
+    # PATH first (worked on older VMs); then explicit ELF if we have one
+    attempts: list[str | None] = [None]
+    if firefox_bin and _elf_binary(firefox_bin):
+        attempts.append(firefox_bin)
+    elif firefox_bin:
+        log(f"Note: {firefox_bin} is launcher script — using PATH")
     seen: set[str | None] = set()
     last_exc: Exception | None = None
 
@@ -166,8 +181,10 @@ def run_warmup(
             return
         firefox_bin = _system_firefox(log)
         gecko = _geckodriver(log)
-        if not firefox_bin or not gecko:
+        if not gecko:
             return
+        if not firefox_bin:
+            log("WARN: Firefox path unknown — trying system PATH")
 
         profile_dir = Path(profile_dir)
         if not profile_dir.is_dir():
