@@ -14,6 +14,16 @@ GECKODRIVER_VERSION = "0.36.0"
 GECKODRIVER_PATHS = ("/usr/local/bin/geckodriver", "/usr/bin/geckodriver")
 
 
+def is_snap_path(path: str | None) -> bool:
+    return bool(path and "/snap/" in path)
+
+
+def _deb_firefox_ok() -> bool:
+    return any(
+        Path(p).is_file() for p in ("/usr/lib/firefox/firefox", "/usr/lib/firefox-esr/firefox")
+    )
+
+
 def _run(cmd: list[str], **kw) -> subprocess.CompletedProcess:
     return subprocess.run(cmd, capture_output=True, text=True, **kw)
 
@@ -38,24 +48,55 @@ def _apt_install(packages: list[str], log) -> bool:
 
 
 def reinstall_firefox(log) -> bool:
-    """Deb Firefox — remove snap if present, install/reinstall apt package."""
-    log("Firefox: remove snap (if any) + install deb package…")
+    """Deb Firefox — snap breaks Selenium; install Mozilla apt build if needed."""
+    log("Firefox: removing snap (Selenium incompatible)…")
     _run(["snap", "remove", "firefox"], check=False)
     _run(["snap", "remove", "firefox", "--purge"], check=False)
 
-    if not _apt_install(["firefox"], log):
-        return False
+    if not _deb_firefox_ok():
+        if not _apt_install(["firefox"], log):
+            log("apt firefox failed — trying Mozilla official repo…")
+        if not _deb_firefox_ok():
+            _install_firefox_mozilla_apt(log)
+
     _run(["apt-get", "install", "-y", "--reinstall", "firefox"], check=False)
 
-    for path in ("/usr/lib/firefox/firefox", "/usr/lib/firefox-esr/firefox"):
-        if Path(path).is_file():
-            log(f"Firefox OK: {path}")
-            return True
-    if shutil.which("firefox"):
-        log(f"Firefox launcher: {shutil.which('firefox')}")
+    if _deb_firefox_ok():
+        log(f"Firefox OK: /usr/lib/firefox/firefox")
         return True
-    log("ERROR: Firefox install failed")
+
+    log("ERROR: deb Firefox missing — snap removed but install failed")
+    log("Manual: sudo snap remove firefox && sudo apt install firefox")
     return False
+
+
+def _install_firefox_mozilla_apt(log) -> None:
+    """Official Mozilla APT repo (deb package, not snap)."""
+    log("Adding packages.mozilla.org…")
+    keyring = Path("/etc/apt/keyrings/packages.mozilla.org.asc")
+    keyring.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        urllib.request.urlretrieve(
+            "https://packages.mozilla.org/apt/repo-signing-key.gpg",
+            keyring,
+        )
+    except Exception as exc:
+        log(f"Mozilla key download failed: {exc}")
+        return
+
+    src = Path("/etc/apt/sources.list.d/mozilla.list")
+    src.write_text(
+        "deb [signed-by=/etc/apt/keyrings/packages.mozilla.org.asc] "
+        "https://packages.mozilla.org/apt mozilla main\n",
+        encoding="utf-8",
+    )
+    prefs = Path("/etc/apt/preferences.d/mozilla-firefox")
+    if not prefs.exists():
+        prefs.write_text(
+            "Package: firefox*\nPin: origin packages.mozilla.org\nPin-Priority: 1000\n",
+            encoding="utf-8",
+        )
+    _apt_install(["firefox"], log)
 
 
 def install_geckodriver(log) -> str | None:
@@ -63,10 +104,13 @@ def install_geckodriver(log) -> str | None:
         if Path(path).is_file() and os.access(path, os.X_OK):
             log(f"Geckodriver: {path}")
             return path
+
     found = shutil.which("geckodriver")
-    if found:
+    if found and not is_snap_path(found):
         log(f"Geckodriver: {found}")
         return found
+    if is_snap_path(found):
+        log("Skip snap geckodriver (use /usr/local/bin)…")
 
     for pkg in ("firefox-geckodriver", "geckodriver"):
         log(f"Trying apt package {pkg}…")
@@ -77,7 +121,7 @@ def install_geckodriver(log) -> str | None:
                     log(f"Geckodriver: {path}")
                     return path
             found = shutil.which("geckodriver")
-            if found:
+            if found and not is_snap_path(found):
                 log(f"Geckodriver: {found}")
                 return found
 
@@ -180,32 +224,35 @@ def ensure_warmup_deps(log, real_user: str) -> bool:
 
     from bravelgo.ff_profile import resolve_firefox_binary
 
-    has_ff = any(
-        Path(p).is_file() for p in ("/usr/lib/firefox/firefox", "/usr/lib/firefox-esr/firefox")
-    ) or bool(shutil.which("firefox"))
-
-    if not has_ff:
+    ff = resolve_firefox_binary(log)
+    if is_snap_path(ff) or not _deb_firefox_ok():
+        log("Snap Firefox detected — installing deb package…")
         if not reinstall_firefox(log):
             return False
-    else:
-        ff = resolve_firefox_binary(log)
-        if ff:
-            log(f"Firefox present: {ff}")
+    elif ff:
+        log(f"Firefox present: {ff}")
 
-    if not install_geckodriver(log):
+    gecko = install_geckodriver(log)
+    if is_snap_path(gecko):
+        log("Replacing snap geckodriver…")
+        gecko = _download_geckodriver(log)
+    if not gecko:
         return False
     if not install_selenium(real_user, log):
         return False
     install_pysocks(real_user, log)
 
     ff = resolve_firefox_binary(log)
-    gecko = shutil.which("geckodriver") or "/usr/local/bin/geckodriver"
-    if not Path(gecko).is_file():
-        gecko = shutil.which("geckodriver") or ""
+    if is_snap_path(ff) or not _deb_firefox_ok():
+        log("ERROR: still on snap Firefox — click Reinstall Firefox")
+        return False
+    gecko = gecko or shutil.which("geckodriver") or ""
+    if is_snap_path(gecko):
+        gecko = "/usr/local/bin/geckodriver"
     if not ff:
         log("ERROR: Firefox missing after install")
         return False
-    if not gecko:
+    if not gecko or not Path(gecko).is_file():
         log("ERROR: geckodriver missing after install")
         return False
     log(f"Warmup ready · Firefox={ff} · geckodriver={gecko}")

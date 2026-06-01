@@ -81,22 +81,10 @@ def _firefox_options(profile_dir: Path, bridge_port: int, cp: dict, binary: str 
     from selenium.webdriver.firefox.options import Options
 
     opts = Options()
-    if binary:
+    if binary and "/snap/" not in binary and _elf_binary(binary):
         opts.binary_location = binary
-    opts.set_preference("browser.shell.checkDefaultBrowser", False)
-    opts.set_preference("browser.startup.page", 0)
-    opts.set_preference("network.proxy.type", 1)
-    opts.set_preference("network.proxy.http", "127.0.0.1")
-    opts.set_preference("network.proxy.http_port", bridge_port)
-    opts.set_preference("network.proxy.ssl", "127.0.0.1")
-    opts.set_preference("network.proxy.ssl_port", bridge_port)
-    opts.set_preference("network.proxy.share_proxy_settings", True)
-    opts.set_preference("network.proxy.no_proxies_on", "localhost, 127.0.0.1")
-    opts.set_preference("media.peerconnection.enabled", False)
-    opts.set_preference("intl.accept_languages", cp["lang_full"])
+    # Proxy/locale/webrtc already in profile user.js — duplicating prefs breaks some Firefox builds
     opts.set_preference("dom.webdriver.enabled", False)
-    opts.set_preference("dom.min_background_timeout_value", 4)
-    opts.set_preference("dom.timeout.enable_budget_timer_throttling", False)
     opts.add_argument("-profile")
     opts.add_argument(str(profile_dir))
     opts.add_argument("-no-remote")
@@ -108,12 +96,12 @@ def _build_driver(profile_dir: Path, firefox_bin: str, gecko: str, bridge_port: 
     from selenium.webdriver.firefox.service import Service
 
     service = Service(executable_path=gecko)
-    # PATH first (worked on older VMs); then explicit ELF if we have one
-    attempts: list[str | None] = [None]
-    if firefox_bin and _elf_binary(firefox_bin):
+    attempts: list[str | None] = []
+    if firefox_bin and _elf_binary(firefox_bin) and "/snap/" not in (firefox_bin or ""):
         attempts.append(firefox_bin)
-    elif firefox_bin:
-        log(f"Note: {firefox_bin} is launcher script — using PATH")
+    attempts.append(None)
+    if firefox_bin and "/snap/" in firefox_bin:
+        log("WARN: snap Firefox ignored — need deb: Reinstall Firefox")
     seen: set[str | None] = set()
     last_exc: Exception | None = None
 
@@ -141,15 +129,17 @@ def _build_driver(profile_dir: Path, firefox_bin: str, gecko: str, bridge_port: 
 
 
 def _geckodriver(log) -> str | None:
-    for candidate in ("/usr/bin/geckodriver", "/usr/local/bin/geckodriver"):
+    for candidate in ("/usr/local/bin/geckodriver", "/usr/bin/geckodriver"):
         if Path(candidate).is_file():
             log(f"Geckodriver: {candidate}")
             return candidate
     found = shutil.which("geckodriver")
-    if found:
+    if found and "/snap/" not in found:
         log(f"Geckodriver: {found}")
         return found
-    log("ERROR: sudo apt install firefox-geckodriver")
+    if found:
+        log("WARN: snap geckodriver skipped — use Reinstall Firefox")
+    log("ERROR: geckodriver missing — Warmup → Reinstall Firefox")
     return None
 
 

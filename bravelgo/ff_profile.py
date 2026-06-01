@@ -112,8 +112,10 @@ def resolve_firefox_binary(log=None, install_if_missing: bool = False) -> str | 
     import subprocess
 
     for path in _firefox_candidates():
+        if "/snap/" in path:
+            continue
         resolved = _resolve_firefox_path(path)
-        if resolved:
+        if resolved and "/snap/" not in resolved:
             if log:
                 if os.path.realpath(path) != os.path.realpath(resolved):
                     log(f"Firefox: {path} → {resolved}")
@@ -165,7 +167,6 @@ def _firefox_candidates() -> list[str]:
         "/usr/lib64/firefox/firefox",
         "/opt/firefox/firefox",
         "/opt/firefox-esr/firefox",
-        "/snap/firefox/current/usr/lib/firefox/firefox",
     ):
         out.append(pattern)
     for match in sorted(glob.glob("/usr/lib/firefox*/firefox")):
@@ -177,7 +178,7 @@ def _firefox_candidates() -> list[str]:
     seen: set[str] = set()
     ordered: list[str] = []
     for item in out:
-        if item and item not in seen:
+        if item and item not in seen and "/snap/" not in item:
             seen.add(item)
             ordered.append(item)
     return ordered
