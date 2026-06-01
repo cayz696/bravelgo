@@ -316,16 +316,17 @@ class App(ModernApp):
                 )
         if cc == "?":
             cc = self.cfg.get("fingerprint", {}).get("country_code", "FR")
-            self.log(f"Geo fallback → {cc}")
+            self.log(f"Geo fallback → {cc} (no proxy geo)")
+        else:
+            self.log(f"Country from proxy geo → {cc} (Profile dropdown ignored by Full uniquify)")
+        tz_use = proxy_tz if proxy_tz != "?" else None
         reg = registry_path(USER_HOME, MOUNT_PT)
         self.log(registry_summary(reg))
-        fp = unique_fingerprint(
-            cc, proxy_tz if cc == "US" and proxy_tz != "?" else None, reg, self.log,
-        )
+        fp = unique_fingerprint(cc, tz_use, reg, self.log)
         self.cfg["fingerprint"] = fp
         cfg_save(self.cfg)
         self.root.after(0, lambda: self._fp_display(fp))
-        cp = country_profile(cc, fp["timezone"])
+        cp = country_profile(cc, tz_use or fp.get("timezone"))
         mac = ""
 
         if self.v_f_hw.get():
@@ -411,7 +412,10 @@ class App(ModernApp):
             0,
             lambda: messagebox.showinfo(
                 "Done",
-                f"Country: {cp['name']}\nHost: {fp['hostname']}\n\n"
+                f"Country: {fp.get('country_name', cp['name'])} ({fp.get('country_code', cc)})\n"
+                f"TZ: {fp.get('timezone', '?')}\n"
+                f"Host: {fp['hostname']}\n\n"
+                "Source: active proxy geo (not Profile tab).\n"
                 "Restart Firefox, then reboot VM.\n"
                 "If black screen after reboot: see README recovery steps.",
             ),
@@ -627,7 +631,10 @@ class App(ModernApp):
     # ── PROFILE TAB ───────────────────────────────────────────────────────────
     def _build_profile(self):
         p = self.tab_profile
-        self._hint(self._card(p, "Variant A"), "Clean Linux Firefox. Language matches proxy country.")
+        self._hint(self._card(p, "Variant A"),
+                   "Full uniquify uses **proxy geo**, not this dropdown.\n"
+                   "For Netherlands: NL proxy + Test + Apply, then Full uniquify.\n"
+                   "Apply country = preview only (saved until uniquify).")
         inf = self._card(p, "Current profile")
         self.fp_text = self._text(inf, height=7, mono=False, readonly=True)
         gf = self._card(p, "Generate")
@@ -658,7 +665,7 @@ class App(ModernApp):
                 cc, tz = get_proxy_country(parts[0], parts[1], parts[2], parts[3], raw.startswith("socks5://"), self.log)
         if cc == "?":
             cc = "FR"
-        fp = generate_fingerprint(cc, tz if cc == "US" and tz != "?" else None)
+        fp = generate_fingerprint(cc, tz if tz != "?" else None)
         self.cfg["fingerprint"] = fp
         cfg_save(self.cfg)
         self.root.after(0, lambda: self._fp_display(fp))

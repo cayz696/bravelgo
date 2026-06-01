@@ -100,6 +100,15 @@ COUNTRY_PROFILES = {
         "keyboard": "ua",
         "ff_locale": "uk-UA",
     },
+    "NZ": {
+        "name": "New Zealand",
+        "timezone": "Pacific/Auckland",
+        "locale": "en_NZ.UTF-8",
+        "language": "en-NZ",
+        "lang_full": "en-NZ,en;q=0.9,en-US;q=0.8",
+        "keyboard": "us",
+        "ff_locale": "en-NZ",
+    },
 }
 
 HOST_PREFIX = ("DESKTOP", "LAPTOP", "PC", "WORK", "DEV")
@@ -107,7 +116,19 @@ CORES = (2, 4, 4, 4, 8, 8)
 
 
 def country_profile(country_code: str, timezone_override: str | None = None) -> dict:
-    cp = dict(COUNTRY_PROFILES.get(country_code.upper(), COUNTRY_PROFILES["FR"]))
+    cc = country_code.upper()
+    if cc in COUNTRY_PROFILES:
+        cp = dict(COUNTRY_PROFILES[cc])
+    else:
+        cp = {
+            "name": cc,
+            "timezone": timezone_override or "UTC",
+            "locale": "en_US.UTF-8",
+            "language": "en-US",
+            "lang_full": "en-US,en;q=0.9",
+            "keyboard": "us",
+            "ff_locale": "en-US",
+        }
     if timezone_override:
         cp["timezone"] = timezone_override
     return cp
