@@ -28,7 +28,9 @@ def _deb_firefox_ok() -> bool:
 
 
 def _run(cmd: list[str], **kw) -> subprocess.CompletedProcess:
-    return subprocess.run(cmd, capture_output=True, text=True, **kw)
+    kw.setdefault("capture_output", True)
+    kw.setdefault("text", True)
+    return subprocess.run(cmd, **kw)
 
 
 def _user_import_ok(real_user: str, module: str) -> bool:
@@ -74,9 +76,8 @@ def reinstall_firefox(log) -> bool:
     log("Installing deb Firefox from Mozilla repo…")
     _run(
         ["apt-get", "remove", "-y", "firefox"],
-        capture_output=True,
-        text=True,
         env={**os.environ, "DEBIAN_FRONTEND": "noninteractive"},
+        check=False,
     )
     if not _apt_install(["firefox"], log):
         log("Retry firefox with force options…")
