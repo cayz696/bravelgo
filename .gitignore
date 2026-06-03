@@ -10,4 +10,7 @@ venv/
 .bravelgo.json
 .bravelgo-warmup-urls.txt
 .bravelgo-warmup.log
+.bravelgo-publish.log
+.bravelgo-publish-policy.txt
+.bravelgo-publish-go
 .bravelgo-registry.json

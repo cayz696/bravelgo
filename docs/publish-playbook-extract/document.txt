@@ -1,0 +1,58 @@
+## Account
+- Email:брати з облікового запису або вводити вручну в меню програми
+- Browser: Firefox (BravelGo profile path: default / custom) оприділяти де лежить профіль і виконувати- запускати саме його - підставляючи в плейврайт
+- Console UI language: EN / UK / RU - можуть бути і інші локалі - оприділяти ші
+## App
+- Package: com.example.game
+приклад головної сторінки на англ мові посилання https://play.google.com/console/
+я сам буду відкривати його
+після цього йде створення додатку кнопкою create application
+потім відкриється вікно (тут доречі мабуть треба обробник створити що дані не вносились поки не завантажиться повністью сторінка )
+Application name - беремо з нашої програми
+Package name - беремо з нашої програми(тут доречі після вводу пекедж нейма зявиться активна кнопка check availability її потрібно натиснути і якщо на її місці зявиться напис This package name is available.)можемо продовжувати далі ввесення даних - якщо ні сигнал помилки з цим блоком
+потім Default language - буде випадаючий список де потрібно вибрати завжди English (United States) – en-USApplication or game - круглий чекбокс - вибираємо game
+Free or paid - круглий чекбокс вибираємо For freeпотім Applications - вибираємо всі чекпокси які будуть нижче коли всі верхні пункти завершено натискаємо кнопку
+create application
+після цього в нас завантажується головна сторінка і має такий вигляд
+на даному етапі ми беремо назву додатка пошту та створюємо також унікальну політикуу яку розміщеємо на гугл докс (цей момент можеш або сам подумати як створити або напиши мені я додатково все покажу )після того як створилась політика йдемо в цей блок Set up your app
+Provide information about your app and set up your Store Listing
+і натискаємо view tasks - зявиться ось такий розкривающий список
+натискамо Set privacy policy
+чекаємо завантаження - в полі що нижче на скріні вставляємо нашу політику натискаємо знизу кнопку зберегти save
+- потім кнопку dashboard - надалі працюємо тільки з цим блоком - після переходу на дашборд натискаємо App access - натискаємо круглий чекбокс All functionality in my app is available without any access restrictions - зберегти save - таж сама дія повернення в дашбоард
+потім Ads - круглий чекбокс No, my app does not contain ads - save - дашбордContent ratings - кнопка start questionnaire - Email address - беремо з програми мейл і вставляємо вполе - Category - game круглий чекбокс- Terms and conditions - чекбокс - потім кнопка некст - Violence, blood or gory images
+круглий чекбокс - no -Fear - круглий чекбокс no - Sexuality, suggestiveness or dating games круглий чекбокс no - Gambling themes, simulated gambling or real gambling круглий чекбокс no -Language круглий чекбокс no -Controlled Substance круглий чекбокс no - Crude Humour круглий чекбокс no- Digital purchases, cash convertible rewards or NFTs круглий чекбокс no - Miscellaneous - всі чекбокси що до низу NO
+потім кнопка Save - Next - Save - dashboard
+Target audience- скрін нижче
+потім Next - Save - dashboard
+Data safety
+Next ->Does your app collect or share any of the required user data types? - checkbox NO->next - і ось тут цікавий момент що кнопка сейв ховається за 3 крапками див скрін
+Save -> dashboard -> Government apps -> checkbox NO->Save->dashboard->
+Financial features -> скрол в самий низ -> checkbox My app doesn't provide any financial features-> next -> Save(тоже за трьома крапками )
+->dashboard - > Health apps -> скрол в самий низ -> checkbox My app does not have any health features -> next -> Save->dashboard-> Store settings
+App category -> edit ->
+Category * - Arcade - > save (потім на хрестик закрити вікно те що всплило)
+Store Listing contact details - > edit -> Email address *(вставляємо нашу пошту)- save (потім на хрестик закрити вікно те що всплило)-> dashboard - > Create default store listing - 	і ось сюди наш текст в відповідні поля (апп нейм уже може бути ввеедений тому потрібно перевіряти і потім вставляти )
+- Display name:
+- Already created in Console: yes / no
+- If no — how you create it (steps + screenshots)
+## Flow order (numbered)
+1. ...
+2. ...
+## Store listing
+- Default language:
+- Title source: Publish tab / Gemini
+- Short + Full: Gemini then paste / manual edit?
+- Graphics folder structure: icon name, banner name, screenshots count
+## Privacy (Google Docs)
+1. Create doc titled: ...
+2. Paste: generated HTML / plain text
+3. Share: Anyone with link → Viewer
+4. URL format you use: edit / preview / ...
+## What bot must NOT do
+- [ ] Press Save
+- [ ] Submit for review
+- [ ] ...
+## Edge cases
+- Corporate account: yes/no
+- Same email in policy as Console account: yes

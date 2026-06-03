@@ -75,7 +75,16 @@ def cfg_load() -> dict:
                 return json.load(f)
     except Exception:
         pass
-    return {"proxies": [], "active_proxy": "", "proxy_type": "HTTP", "fingerprint": {}, "ff_profile": ""}
+    from bravelgo.publish.config import default_publish_config
+
+    return {
+        "proxies": [],
+        "active_proxy": "",
+        "proxy_type": "HTTP",
+        "fingerprint": {},
+        "ff_profile": "",
+        "publish": default_publish_config(),
+    }
 
 
 def cfg_save(c: dict) -> None:
@@ -143,6 +152,7 @@ class App(ModernApp):
                 ("hw", " Hardware "),
                 ("disk", " Disk "),
                 ("warmup", " Warmup "),
+                ("publish", " Publish "),
             ],
         )
         self.tab_full = frames["full"]
@@ -151,6 +161,7 @@ class App(ModernApp):
         self.tab_hw = frames["hw"]
         self.tab_disk = frames["disk"]
         self.tab_warmup = frames["warmup"]
+        self.tab_publish = frames["publish"]
 
         self._build_full()
         self._build_proxy()
@@ -158,6 +169,7 @@ class App(ModernApp):
         self._build_hw()
         self._build_disk()
         self._build_warmup()
+        self._build_publish()
 
         log_wrap = tk.Frame(shell, bg=C.BG)
         log_wrap.grid(row=1, column=0, sticky="nsew", padx=16, pady=(4, 14))
@@ -619,6 +631,323 @@ class App(ModernApp):
         except Exception as exc:
             self.log(f"Log read error: {exc}")
 
+    # ── PUBLISH TAB ───────────────────────────────────────────────────────────
+    def _build_publish(self):
+        from bravelgo.publish.config import merge_publish_config
+
+        p = self.tab_publish
+        pub = merge_publish_config(self.cfg)
+        self._hint(
+            self._card(p, "Play publish (UI automation)"),
+            "System Firefox (deb) + auto-detected Mozilla profile · Playwright.\n"
+            "Gemini Vision for any UI language · detached background like Warmup.\n"
+            "Opens browser → you go to Play Console → Continue → Docs + Console tasks.",
+        )
+
+        pf = self._card(p, "Firefox profile (auto)")
+        self.lbl_pub_profile = tk.Label(pf, text="", fg=C.TEXT2, bg=C.SURFACE, justify="left", anchor="w")
+        self.lbl_pub_profile.pack(fill="x")
+        self._publish_show_profile()
+
+        acc = self._card(p, "Account & app")
+        g = tk.Frame(acc, bg=C.SURFACE)
+        g.pack(fill="x")
+        def _pub_entry(parent, width=40):
+            e = tk.Entry(
+                parent, width=width, bg=C.INPUT_BG, fg=C.INPUT_FG, insertbackground=C.ACCENT,
+                relief="flat", highlightthickness=1,
+                highlightbackground=C.BORDER, highlightcolor=C.BORDER_FOCUS,
+                font=FONT_MONO,
+            )
+            e.pack(side="left", fill="x", expand=True, ipady=6)
+            return e
+
+        for label, attr, width in (
+            ("Account email", "ent_pub_email", 42),
+            ("Package name", "ent_pub_package", 42),
+            ("App name", "ent_pub_app", 36),
+        ):
+            row = tk.Frame(g, bg=C.SURFACE)
+            row.pack(fill="x", pady=(0, 6))
+            tk.Label(row, text=label, fg=C.TEXT2, bg=C.SURFACE, width=14, anchor="w").pack(side="left")
+            setattr(self, attr, _pub_entry(row, width))
+        self.ent_pub_email.insert(0, pub.get("account_email", ""))
+        self.ent_pub_package.insert(0, pub.get("package_name", ""))
+        self.ent_pub_app.insert(0, pub.get("app_name", ""))
+
+        row2 = tk.Frame(acc, bg=C.SURFACE)
+        row2.pack(fill="x", pady=(4, 0))
+        self.v_pub_app_exists = tk.BooleanVar(value=bool(pub.get("app_already_exists")))
+        ttk.Checkbutton(
+            row2,
+            text="App already exists in Console (skip Create application)",
+            variable=self.v_pub_app_exists,
+        ).pack(anchor="w")
+        self.v_pub_vision = tk.BooleanVar(value=bool(pub.get("use_vision", True)))
+        ttk.Checkbutton(row2, text="Gemini Vision (any Console language)", variable=self.v_pub_vision).pack(anchor="w")
+        self.v_pub_wait = tk.BooleanVar(value=bool(pub.get("wait_for_console", True)))
+        ttk.Checkbutton(
+            row2,
+            text="Wait for Play Console before automation (Continue button)",
+            variable=self.v_pub_wait,
+        ).pack(anchor="w")
+        self.v_pub_detached = tk.BooleanVar(value=bool(pub.get("detached", True)))
+        ttk.Checkbutton(
+            row2,
+            text="Detached — runs in background (like Warmup)",
+            variable=self.v_pub_detached,
+        ).pack(anchor="w")
+
+        gf = self._card(p, "Gemini API (per VM profile)")
+        kr = tk.Frame(gf, bg=C.SURFACE)
+        kr.pack(fill="x")
+        tk.Label(kr, text="API key", fg=C.TEXT2, bg=C.SURFACE, width=14, anchor="w").pack(side="left")
+        self.ent_pub_gemini = tk.Entry(
+            kr, width=48, show="*", bg=C.INPUT_BG, fg=C.INPUT_FG, insertbackground=C.ACCENT,
+            relief="flat", highlightthickness=1,
+            highlightbackground=C.BORDER, highlightcolor=C.BORDER_FOCUS,
+            font=FONT_MONO,
+        )
+        self.ent_pub_gemini.pack(side="left", fill="x", expand=True, ipady=6)
+        self.ent_pub_gemini.insert(0, pub.get("gemini_api_key", ""))
+
+        gr = tk.Frame(gf, bg=C.SURFACE)
+        gr.pack(fill="x", pady=(8, 0))
+        tk.Label(gr, text="Graphics folder", fg=C.TEXT2, bg=C.SURFACE, width=14, anchor="w").pack(side="left")
+        self.ent_pub_graphics = tk.Entry(
+            gr, width=48, bg=C.INPUT_BG, fg=C.INPUT_FG, insertbackground=C.ACCENT,
+            relief="flat", highlightthickness=1,
+            highlightbackground=C.BORDER, highlightcolor=C.BORDER_FOCUS,
+            font=FONT_MONO,
+        )
+        self.ent_pub_graphics.pack(side="left", fill="x", expand=True, ipady=6)
+        self.ent_pub_graphics.insert(0, pub.get("graphics_dir", ""))
+
+        pf = self._card(p, "Listing prompt (editable)", expand=True)
+        self.txt_pub_listing_prompt = self._text(pf, height=8, mono=True, readonly=False)
+        self.txt_pub_listing_prompt.insert(tk.END, pub.get("listing_prompt", ""))
+
+        pp = self._card(p, "Privacy prompt (editable)", expand=True)
+        self.txt_pub_privacy_prompt = self._text(pp, height=6, mono=True, readonly=False)
+        self.txt_pub_privacy_prompt.insert(tk.END, pub.get("privacy_prompt", ""))
+
+        out = self._card(p, "Last run")
+        tk.Label(out, text="Privacy URL", fg=C.TEXT2, bg=C.SURFACE).pack(anchor="w")
+        self.ent_pub_privacy_url = tk.Entry(
+            out, bg=C.INPUT_BG, fg=C.INPUT_FG, insertbackground=C.ACCENT,
+            relief="flat", highlightthickness=1,
+            highlightbackground=C.BORDER, highlightcolor=C.BORDER_FOCUS,
+            font=FONT_MONO,
+        )
+        self.ent_pub_privacy_url.pack(fill="x", pady=(4, 6), ipady=6)
+        self.ent_pub_privacy_url.insert(0, pub.get("last_privacy_url", ""))
+        self.lbl_pub_listing = tk.Label(out, text="", fg=C.TEXT2, bg=C.SURFACE, justify="left", anchor="w")
+        self.lbl_pub_listing.pack(fill="x")
+        self._publish_refresh_listing_label(pub)
+
+        cf = tk.Frame(p, bg=C.BG)
+        cf.pack(fill="x", pady=(0, 6))
+        self._btn(
+            cf,
+            "Continue — I'm on Console",
+            self._publish_continue_signal,
+            variant="primary",
+            side="left",
+            padx=(0, 8),
+        )
+        self._hint(
+            cf,
+            "While publish runs: open play.google.com/console, then press Continue.",
+        )
+
+        bf = tk.Frame(p, bg=C.BG)
+        bf.pack(fill="x", pady=(0, 8))
+        self._btn(bf, "Save settings", self._publish_save, variant="ghost", side="left", padx=(0, 6))
+        self._btn(bf, "Generate texts", self._publish_thread_generate, variant="ghost", side="left", padx=(0, 6))
+        self._btn(bf, "Docs only", self._publish_thread_docs, variant="ghost", side="left", padx=(0, 6))
+        self._btn(bf, "Console only", self._publish_thread_console, variant="ghost", side="left", padx=(0, 6))
+        self._btn(bf, "Full publish", self._publish_thread_full, variant="primary", side="left", padx=(0, 6))
+        self._btn(bf, "Tail log", self._publish_tail_log, variant="ghost", side="left")
+
+    def _publish_collect(self) -> dict:
+        from bravelgo.publish.config import merge_publish_config
+
+        pub = merge_publish_config(self.cfg)
+        pub["account_email"] = self.ent_pub_email.get().strip()
+        pub["package_name"] = self.ent_pub_package.get().strip()
+        pub["app_name"] = self.ent_pub_app.get().strip()
+        pub["gemini_api_key"] = self.ent_pub_gemini.get().strip()
+        pub["graphics_dir"] = self.ent_pub_graphics.get().strip()
+        pub["listing_prompt"] = self.txt_pub_listing_prompt.get("1.0", tk.END).strip()
+        pub["privacy_prompt"] = self.txt_pub_privacy_prompt.get("1.0", tk.END).strip()
+        pub["app_already_exists"] = self.v_pub_app_exists.get()
+        pub["use_vision"] = self.v_pub_vision.get()
+        pub["wait_for_console"] = self.v_pub_wait.get()
+        pub["detached"] = self.v_pub_detached.get()
+        pub["last_privacy_url"] = self.ent_pub_privacy_url.get().strip()
+        return pub
+
+    def _publish_show_profile(self):
+        from bravelgo.publish.profile_resolve import resolve_profile_dir
+
+        prof = resolve_profile_dir(USER_HOME, self.cfg, None)
+        if hasattr(self, "lbl_pub_profile"):
+            if prof:
+                self.lbl_pub_profile.configure(text=f"Using: {prof}")
+            else:
+                self.lbl_pub_profile.configure(
+                    text="No profile found — run Full uniquify or Launch Firefox"
+                )
+
+    def _publish_continue_signal(self):
+        from bravelgo.publish.wait_console import touch_continue_flag
+
+        touch_continue_flag()
+        _run(f"chown {REAL_USER}:{REAL_USER} '{USER_HOME}/.bravelgo-publish-go'")
+        self.log("Continue signal sent — publish worker will proceed")
+        self.set_status("Continue sent", "ok")
+
+    def _publish_save(self):
+        from bravelgo.publish.config import save_publish_section
+
+        pub = self._publish_collect()
+        save_publish_section(self.cfg, pub)
+        cfg_save(self.cfg)
+        self._publish_refresh_listing_label(pub)
+        self.log("Publish settings saved")
+        self.set_status("Publish settings saved", "ok")
+
+    def _publish_refresh_listing_label(self, pub: dict):
+        listing = pub.get("last_listing") or {}
+        short = listing.get("short", "")
+        full = listing.get("full", "")
+        self.lbl_pub_listing.configure(
+            text=f"Listing cached: short {len(short)}/80 · full {len(full)}/4000"
+            if short or full
+            else "Listing cached: (none — run Generate texts)"
+        )
+
+    def _publish_thread_generate(self):
+        threading.Thread(target=lambda: self._publish_run(step="generate"), daemon=True).start()
+
+    def _publish_thread_docs(self):
+        threading.Thread(target=lambda: self._publish_run(step="docs"), daemon=True).start()
+
+    def _publish_thread_console(self):
+        threading.Thread(target=lambda: self._publish_run(step="console"), daemon=True).start()
+
+    def _publish_thread_full(self):
+        threading.Thread(target=lambda: self._publish_run(step="all"), daemon=True).start()
+
+    def _publish_run(self, step: str = "all"):
+        from bravelgo.publish.config import save_publish_section
+        from bravelgo.publish.deps import ensure_publish_deps
+        from bravelgo.publish.profile_resolve import resolve_profile_dir
+        from bravelgo.publish.wait_console import clear_continue_flag
+
+        profile = self._active_profile_dir() or resolve_profile_dir(USER_HOME, self.cfg, self.log)
+        if not profile:
+            self.root.after(
+                0,
+                lambda: self.show_error(
+                    "Publish",
+                    "Firefox profile not found — run Full uniquify or Launch Firefox once",
+                ),
+            )
+            return
+
+        pub = self._publish_collect()
+        save_publish_section(self.cfg, pub)
+        cfg_save(self.cfg)
+        self._publish_show_profile()
+
+        if step != "generate" and not ensure_publish_deps(self.log, REAL_USER):
+            self.set_status("Publish blocked — install Playwright", "idle")
+            return
+
+        clear_continue_flag()
+
+        self.log(f"Publish start · step={step} · {pub.get('package_name')}")
+        self.log(f"Profile: {profile}")
+        if step != "generate":
+            self.log("Firefox will open via Playwright — go to Play Console, then Continue")
+        self.set_status("Publish running…", "warn")
+
+        script = os.path.join(BASE_DIR, "bravelgo", "run_publish.py")
+        log_path = f"{USER_HOME}/.bravelgo-publish.log"
+        cmd = [
+            "sudo", "-u", REAL_USER,
+            "env", "DISPLAY=:0", f"HOME={USER_HOME}",
+            "python3", script,
+            "--profile-dir", profile,
+            "--step", step,
+        ]
+        if pub.get("app_already_exists"):
+            cmd.append("--skip-create")
+        if not pub.get("use_vision", True):
+            cmd.append("--no-vision")
+        if not pub.get("wait_for_console", True):
+            cmd.append("--no-wait-console")
+
+        detached = pub.get("detached", True)
+
+        try:
+            with open(log_path, "w", encoding="utf-8") as lf:
+                lf.write(f"Publish {step} · detached={detached}\n")
+            _run(f"chown {REAL_USER}:{REAL_USER} '{log_path}'")
+
+            if detached:
+                with open(log_path, "a", encoding="utf-8") as lf:
+                    proc = subprocess.Popen(
+                        cmd,
+                        stdout=lf,
+                        stderr=subprocess.STDOUT,
+                        text=True,
+                        start_new_session=True,
+                    )
+                self.log(f"Detached PID {proc.pid} → {log_path}")
+                self.log("Press «Continue — I'm on Console» when ready · Tail log for progress")
+                self.set_status("Publish detached", "ok")
+                self.root.after(8000, self._publish_tail_log)
+                return
+
+            proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+            for line in proc.stdout or []:
+                line = line.rstrip()
+                if line:
+                    self.log(line.lstrip("[*] ").lstrip("* "))
+            proc.wait()
+            self.cfg = cfg_load()
+            pub2 = self.cfg.get("publish", {})
+            self.root.after(0, lambda: self._publish_apply_results(pub2))
+            if proc.returncode == 0:
+                self.set_status("Publish done", "ok")
+            else:
+                self.set_status("Publish failed", "idle")
+                self.log(f"Exit code {proc.returncode}")
+        except Exception as exc:
+            self.log(f"Publish error: {exc}")
+            self.set_status("Publish error", "idle")
+
+    def _publish_apply_results(self, pub: dict):
+        url = pub.get("last_privacy_url", "")
+        if url:
+            self.ent_pub_privacy_url.delete(0, tk.END)
+            self.ent_pub_privacy_url.insert(0, url)
+        self._publish_refresh_listing_label(pub)
+
+    def _publish_tail_log(self):
+        log_path = f"{USER_HOME}/.bravelgo-publish.log"
+        if not os.path.isfile(log_path):
+            self.log("No publish log yet")
+            return
+        try:
+            with open(log_path, encoding="utf-8") as f:
+                tail = f.read()[-4000:]
+            for ln in tail.splitlines()[-30:]:
+                self.log(ln)
+        except Exception as exc:
+            self.log(f"Log read error: {exc}")
 
     # ── PROFILE TAB ───────────────────────────────────────────────────────────
     def _build_profile(self):

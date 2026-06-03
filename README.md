@@ -74,7 +74,25 @@ BravelGo знову → Proxy Apply → Disk Mount
 Warmup → Reinstall Firefox (перший раз) → Start warmup ×3–5
   ↓
 Launch Firefox → Google / Play Console
+  ↓
+Publish (опційно) → Generate → Docs → Console → вручну в prod
 ```
+
+---
+
+## Publish (залив)
+
+Вкладка **Publish** — без Play API, через Firefox-профіль + Playwright.
+
+1. Заповни email, package, app name, Gemini API key, промпти (редаговані).
+2. **Save settings**
+3. **Generate texts** → listing + policy (кеш у `~/.bravelgo.json`)
+4. **Docs only** / **Console only** / **Full publish**
+5. Дороби вручну та відправ у production.
+
+Деталі: `docs/publish-playbook.md` · лог: `~/.bravelgo-publish.log`
+
+Перший раз: `python3 -m playwright install firefox` (або кнопка Full publish — ставить deps).
 
 ---
 
