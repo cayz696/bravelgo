@@ -662,7 +662,7 @@ class App(ModernApp):
         self._btn(r2, "Tail log", self._publish_tail_log, variant="ghost", side="left")
         self._hint(
             btn_row.master,
-            "1) Save settings  2) Generate texts  3) Full publish  4) On Console → Continue",
+            "1) Save  2) Generate (NO Firefox)  3) Full publish (Firefox opens)  4) Continue on Console",
             bg=C.ELEVATED,
         )
 
@@ -930,8 +930,14 @@ class App(ModernApp):
 
         self.log(f"Publish start · step={step} · {pub.get('package_name')}")
         self.log(f"Profile: {profile}")
-        if step != "generate":
-            self.log("Firefox will open via Playwright — go to Play Console, then Continue")
+        if step == "generate":
+            self.log("Generate = NO Firefox (only Gemini). Use «Full publish» to open browser.")
+        elif step == "docs":
+            self.log("Docs = Firefox opens → Google Docs only")
+        elif step == "console":
+            self.log("Console = Firefox opens → Play Console (Continue when on Console)")
+        else:
+            self.log("Full publish = Firefox → Console wait → Docs → Console tasks")
         self.set_status("Publish running…", "warn")
 
         script = os.path.join(BASE_DIR, "bravelgo", "run_publish.py")
@@ -967,7 +973,11 @@ class App(ModernApp):
                         start_new_session=True,
                     )
                 self.log(f"Detached PID {proc.pid} → {log_path}")
-                self.log("Press «Continue — I'm on Console» when ready · Tail log for progress")
+                if step == "generate":
+                    self.log("Tail log — when done, click «▶ Full publish» to open Firefox")
+                else:
+                    self.log("Firefox will open — go to Play Console, then «Continue — on Console»")
+                    self.log("Tail log for progress")
                 self.set_status("Publish detached", "ok")
                 self.root.after(8000, self._publish_tail_log)
                 return
@@ -1006,7 +1016,11 @@ class App(ModernApp):
             with open(log_path, encoding="utf-8") as f:
                 tail = f.read()[-4000:]
             for ln in tail.splitlines()[-30:]:
-                self.log(ln)
+                s = ln.strip()
+                while s.startswith("[*]"):
+                    s = s[3:].strip()
+                if s:
+                    self.log(s)
         except Exception as exc:
             self.log(f"Log read error: {exc}")
 

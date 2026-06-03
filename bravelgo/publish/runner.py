@@ -51,6 +51,9 @@ def run_publish(
     result: dict = {"privacy_url": pub.get("last_privacy_url", ""), "listing": pub.get("last_listing", {})}
     seed = unique_seed()
 
+    if step == "generate":
+        log("Generate: browser stays closed (Gemini API only)")
+
     if step in ("all", "generate"):
         texts_dir = pub.get("texts_dir", "")
         local_listing, local_policy = try_load_local_texts(package, app_name, texts_dir, log)
@@ -126,6 +129,7 @@ def run_publish(
     if not need_browser:
         return result
 
+    log("Opening Firefox (Playwright + your profile)…")
     pw, context, page = launch_context(prof, log)
     ui = PublishUI(page, log, gemini_api_key=api_key, use_vision=use_vision)
 

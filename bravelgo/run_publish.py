@@ -61,7 +61,14 @@ def main() -> None:
         except OSError:
             pass
 
+    STEP_NOTE = {
+        "generate": "NO Firefox — only Gemini API → saves listing + policy to cache",
+        "docs": "Opens Firefox → Google Docs → privacy URL",
+        "console": "Opens Firefox → Play Console forms (use Continue if waiting)",
+        "all": "Opens Firefox → wait Console → Docs → Console setup",
+    }
     LOG_F.write_text(f"=== Publish {args.step} ===\n", encoding="utf-8")
+    log(STEP_NOTE.get(args.step, args.step))
     log(f"Package: {pub.get('package_name')} · App: {pub.get('app_name')}")
 
     try:
