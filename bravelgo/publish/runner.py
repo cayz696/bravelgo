@@ -167,7 +167,7 @@ def run_publish(
     api_key = pub.get("gemini_api_key", "").strip()
     use_vision = use_vision and bool(pub.get("use_vision", True))
     wait_console = wait_console and bool(pub.get("wait_for_console", True))
-    skip_docs = should_skip_docs(pub, skip_docs)
+    skip_docs = should_skip_docs(pub, skip_docs, home=home)
     country = (cfg.get("country") or pub.get("country") or "FR").strip()
 
     if not email or not package or not app_name:
@@ -179,7 +179,7 @@ def run_publish(
         raise ValueError("Firefox profile not found — run Full uniquify or Launch Firefox once")
 
     result: dict = {
-        "privacy_url": privacy_url_from_pub(pub),
+        "privacy_url": privacy_url_from_pub(pub, home),
         "listing": listing_from_pub(pub, app_name),
     }
 
@@ -192,13 +192,13 @@ def run_publish(
         result["policy_text"] = policy
         return result
 
-    validate_for_browser_step(pub, step)
+    validate_for_browser_step(pub, step, home=home)
     listing, policy = _load_cached_texts(pub, package, app_name, log, home=home)
     if not listing:
         raise ValueError("No listing — fill manual fields and Save manual texts")
     result["listing"] = listing
     result["policy_text"] = policy or ""
-    privacy_url = privacy_url_from_pub(pub)
+    privacy_url = privacy_url_from_pub(pub, home)
     log(
         f"Ready: listing short={len(listing.get('short', ''))} "
         f"full={len(listing.get('full', ''))} · privacy URL={'yes' if privacy_url else 'NO'} · "

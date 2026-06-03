@@ -13,7 +13,12 @@ sys.path.insert(0, str(BASE))
 
 from bravelgo.publish.config import merge_publish_config  # noqa: E402
 from bravelgo.publish.lock_util import release_lock, try_acquire_lock  # noqa: E402
-from bravelgo.publish.paths import config_path, publish_log_path  # noqa: E402
+from bravelgo.publish.paths import (  # noqa: E402
+    config_path,
+    publish_log_path,
+    read_privacy_url_file,
+    write_privacy_url_file,
+)
 from bravelgo.publish.runner import run_publish  # noqa: E402
 
 LOG_F = publish_log_path()
@@ -69,9 +74,11 @@ def main() -> None:
 
     cfg = load_cfg(home)
     pub = merge_publish_config(cfg)
-    if args.privacy_url.strip():
-        pub["last_privacy_url"] = args.privacy_url.strip()
+    url = (args.privacy_url or "").strip() or read_privacy_url_file(home)
+    if url:
+        pub["last_privacy_url"] = url
         cfg["publish"] = pub
+        write_privacy_url_file(url, home)
     if args.skip_create:
         pub["app_already_exists"] = True
         cfg["publish"] = pub
@@ -93,8 +100,15 @@ def main() -> None:
         except OSError:
             pass
 
+    STEP_NOTE = {
+        "generate": "NO Firefox — Gemini only",
+        "docs": "Firefox → Google Docs (needs policy text)",
+        "console": "Firefox → Play Console only",
+        "all": "Firefox → Play Console (Docs skipped if URL set)",
+    }
     LOG_F.write_text(f"=== Publish {args.step} · pid={os.getpid()} · home={home} ===\n", encoding="utf-8")
     log(f"Worker started · step={args.step} · pid={os.getpid()}")
+    log(STEP_NOTE.get(args.step, args.step))
     if pub.get("last_privacy_url"):
         log(f"Privacy URL: {pub['last_privacy_url'][:90]}…")
     else:

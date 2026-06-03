@@ -24,13 +24,24 @@ def policy_from_pub(pub: dict, home: str | None = None) -> str:
     return load_policy_cache(home) or ""
 
 
-def privacy_url_from_pub(pub: dict) -> str:
-    return (pub.get("last_privacy_url") or "").strip()
+def privacy_url_from_pub(pub: dict, home: str | None = None) -> str:
+    url = (pub.get("last_privacy_url") or "").strip()
+    if url:
+        return url
+    if home:
+        from bravelgo.publish.paths import read_privacy_url_file
+
+        return read_privacy_url_file(home)
+    return ""
 
 
-def should_skip_docs(pub: dict, skip_docs_flag: bool = False) -> bool:
+def should_skip_docs(pub: dict, skip_docs_flag: bool = False, home: str | None = None) -> bool:
     """Privacy URL in BravelGo = do not create a new doc in Google Docs."""
-    return bool(skip_docs_flag) or bool(pub.get("skip_docs_flow")) or bool(privacy_url_from_pub(pub))
+    return (
+        bool(skip_docs_flag)
+        or bool(pub.get("skip_docs_flow"))
+        or bool(privacy_url_from_pub(pub, home))
+    )
 
 
 def save_manual_to_cache(
@@ -51,7 +62,7 @@ def save_manual_to_cache(
     )
 
 
-def validate_for_browser_step(pub: dict, step: str) -> None:
+def validate_for_browser_step(pub: dict, step: str, home: str | None = None) -> None:
     app = (pub.get("app_name") or "").strip()
     listing = listing_from_pub(pub, app)
     if not listing_ready(listing):
@@ -59,8 +70,8 @@ def validate_for_browser_step(pub: dict, step: str) -> None:
             "Store listing incomplete — fill Title, Short (80), Full description, then «Save manual texts»"
         )
 
-    url = privacy_url_from_pub(pub)
-    skip_docs = should_skip_docs(pub)
+    url = privacy_url_from_pub(pub, home)
+    skip_docs = should_skip_docs(pub, home=home)
 
     if step in ("all", "console") and not url:
         raise ValueError(

@@ -916,8 +916,10 @@ class App(ModernApp):
     def _publish_save_manual(self):
         from bravelgo.publish.config import save_publish_section
         from bravelgo.publish.manual_io import save_manual_to_cache
+        from bravelgo.publish.paths import write_privacy_url_file
 
         pub = self._publish_collect()
+        write_privacy_url_file(pub.get("last_privacy_url", ""), USER_HOME)
         save_manual_to_cache(self.cfg, pub, log=self.log, user_home=USER_HOME)
         save_publish_section(self.cfg, pub)
         cfg_save(self.cfg)
@@ -1049,24 +1051,28 @@ class App(ModernApp):
     def _publish_thread_generate(self):
         if self._publish_busy():
             return
-        threading.Thread(target=lambda: self._publish_run(step="generate"), daemon=True).start()
+        pub = self._publish_collect()
+        threading.Thread(target=lambda: self._publish_run(step="generate", pub=pub), daemon=True).start()
 
     def _publish_thread_docs(self):
         if self._publish_busy():
             return
-        threading.Thread(target=lambda: self._publish_run(step="docs"), daemon=True).start()
+        pub = self._publish_collect()
+        threading.Thread(target=lambda: self._publish_run(step="docs", pub=pub), daemon=True).start()
 
     def _publish_thread_console(self):
         if self._publish_busy():
             return
-        threading.Thread(target=lambda: self._publish_run(step="console"), daemon=True).start()
+        pub = self._publish_collect()
+        threading.Thread(target=lambda: self._publish_run(step="console", pub=pub), daemon=True).start()
 
     def _publish_thread_full(self):
         if self._publish_busy():
             return
-        threading.Thread(target=lambda: self._publish_run(step="all"), daemon=True).start()
+        pub = self._publish_collect()
+        threading.Thread(target=lambda: self._publish_run(step="all", pub=pub), daemon=True).start()
 
-    def _publish_run(self, step: str = "all"):
+    def _publish_run(self, step: str = "all", pub: dict | None = None):
         from bravelgo.publish.config import save_publish_section
         from bravelgo.publish.deps import ensure_publish_deps
         from bravelgo.publish.lock_util import clear_stale_publish_lock, is_publish_running
@@ -1094,9 +1100,28 @@ class App(ModernApp):
             self._publish_spawn_guard = False
             return
 
-        pub = self._publish_collect()
-        from bravelgo.publish.manual_io import save_manual_to_cache
+        if pub is None:
+            self._publish_spawn_guard = False
+            self.root.after(0, lambda: self.show_error("Publish", "Internal error: no form data"))
+            return
 
+        from bravelgo.publish.manual_io import save_manual_to_cache
+        from bravelgo.publish.paths import write_privacy_url_file
+
+        privacy_url = (pub.get("last_privacy_url") or "").strip()
+        if step in ("all", "console", "docs") and not privacy_url:
+            self.root.after(
+                0,
+                lambda: self.show_error(
+                    "Publish",
+                    "Privacy policy URL is empty in the form.\n"
+                    "Paste link in «Privacy policy URL» (BravelGo tab), then Save manual texts.",
+                ),
+            )
+            self._publish_spawn_guard = False
+            return
+
+        write_privacy_url_file(privacy_url, USER_HOME)
         save_manual_to_cache(self.cfg, pub, log=None, user_home=USER_HOME)
         save_publish_section(self.cfg, pub)
         cfg_save(self.cfg)
@@ -1113,6 +1138,7 @@ class App(ModernApp):
         clear_continue_flag()
 
         self.log(f"Publish start · step={step} · {pub.get('package_name')}")
+        self.log(f"Privacy URL ({len(privacy_url)} chars): {privacy_url[:85]}…")
         self.log(f"Profile: {profile}")
         if step == "generate":
             self.log("Generate = NO Firefox (only Gemini). Use «Full publish» to open browser.")
@@ -1129,7 +1155,6 @@ class App(ModernApp):
 
         script = os.path.join(BASE_DIR, "bravelgo", "run_publish.py")
         log_path = f"{USER_HOME}/.bravelgo-publish.log"
-        privacy_url = pub.get("last_privacy_url", "").strip()
         cmd = [
             "sudo", "-u", REAL_USER,
             "env", "DISPLAY=:0", f"HOME={USER_HOME}",
@@ -1156,7 +1181,8 @@ class App(ModernApp):
             _run(
                 f"chown {REAL_USER}:{REAL_USER} '{CONFIG_F}' '{log_path}' "
                 f"'{USER_HOME}/.bravelgo-publish-listing.json' "
-                f"'{USER_HOME}/.bravelgo-publish-policy.txt' 2>/dev/null; "
+                f"'{USER_HOME}/.bravelgo-publish-policy.txt' "
+                f"'{USER_HOME}/.bravelgo-publish-privacy-url.txt' 2>/dev/null; "
                 f"rm -f '{USER_HOME}/.bravelgo-publish.lock'"
             )
 
