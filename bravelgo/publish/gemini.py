@@ -1,4 +1,4 @@
-"""Google Gemini API — listing and privacy text generation (free-tier friendly)."""
+"""Google Gemini API — listing and privacy (free tier: one model, short 429 wait)."""
 from __future__ import annotations
 
 import json
@@ -9,17 +9,18 @@ import urllib.error
 import urllib.request
 from datetime import date
 
-# Free tier: one fast model, one lite fallback — avoid burning quota on 4 models
+from bravelgo.publish.config import normalize_gemini_model
+
 DEFAULT_MODEL = "gemini-2.5-flash"
-FALLBACK_MODELS = ("gemini-2.5-flash-lite",)
 PUBLISH_MODEL_CHOICES = (
     "gemini-2.5-flash",
     "gemini-2.5-flash-lite",
     "gemini-2.0-flash",
     "gemini-2.0-flash-lite",
 )
-RETRY_WAIT_SEC = (35, 70, 120)
-PAUSE_BETWEEN_CALLS_SEC = 12
+# One short wait — long chains waste minutes then still 429
+RETRY_WAIT_SEC = (50,)
+PAUSE_BETWEEN_CALLS_SEC = 15
 
 
 class GeminiPublishError(Exception):
@@ -69,53 +70,43 @@ def _call_gemini_once(api_key: str, prompt: str, model: str) -> str:
     return "\n".join(p.get("text", "") for p in parts if p.get("text")).strip()
 
 
-def _models_to_try(preferred: str) -> list[str]:
-    pref = (preferred or DEFAULT_MODEL).strip() or DEFAULT_MODEL
-    out = [pref]
-    for m in FALLBACK_MODELS:
-        if m not in out:
-            out.append(m)
-    return out
-
-
 def _call_gemini(api_key: str, prompt: str, model: str = DEFAULT_MODEL, log=None) -> str:
     if not api_key.strip():
         raise GeminiPublishError("Gemini API key is empty")
 
-    last_err: Exception | None = None
-    for m in _models_to_try(model):
-        for attempt, wait in enumerate((0,) + RETRY_WAIT_SEC):
-            if wait:
-                if log:
-                    log(f"Gemini 429 — wait {wait}s, then retry {m}…")
-                time.sleep(wait)
-            try:
-                if log and m != (model or DEFAULT_MODEL):
-                    log(f"Gemini: fallback model {m}")
-                return _call_gemini_once(api_key, prompt, m)
-            except urllib.error.HTTPError as exc:
-                msg = _parse_http_error(exc)
-                last_err = exc
-                if exc.code == 429 and attempt < len(RETRY_WAIT_SEC):
-                    continue
-                if exc.code == 429:
-                    raise GeminiPublishError(_quota_help(msg)) from exc
-                if exc.code in (503, 500) and attempt < len(RETRY_WAIT_SEC):
-                    continue
-                raise GeminiPublishError(f"Gemini HTTP {exc.code}: {msg}") from exc
-            except urllib.error.URLError as exc:
-                raise GeminiPublishError(f"Gemini network error: {exc}") from exc
-            except (KeyError, IndexError, TypeError) as exc:
-                raise GeminiPublishError("Unexpected Gemini response") from exc
+    m = normalize_gemini_model(model)
+    if log:
+        log(f"Gemini API · model={m} (one retry on 429)")
 
-    raise GeminiPublishError(_quota_help(str(last_err) if last_err else "quota exceeded"))
+    for attempt, wait in enumerate((0,) + RETRY_WAIT_SEC):
+        if wait:
+            if log:
+                log(f"Gemini 429 — wait {wait}s, retry…")
+            time.sleep(wait)
+        try:
+            return _call_gemini_once(api_key, prompt, m)
+        except urllib.error.HTTPError as exc:
+            msg = _parse_http_error(exc)
+            if exc.code == 429 and attempt < len(RETRY_WAIT_SEC):
+                continue
+            if exc.code == 429:
+                raise GeminiPublishError(_quota_help(msg)) from exc
+            if exc.code in (503, 500) and attempt < len(RETRY_WAIT_SEC):
+                continue
+            raise GeminiPublishError(f"Gemini HTTP {exc.code}: {msg}") from exc
+        except urllib.error.URLError as exc:
+            raise GeminiPublishError(f"Gemini network error: {exc}") from exc
+        except (KeyError, IndexError, TypeError) as exc:
+            raise GeminiPublishError("Unexpected Gemini response") from exc
+
+    raise GeminiPublishError(_quota_help("quota exceeded"))
 
 
 def _quota_help(detail: str) -> str:
     return (
-        "Gemini quota (HTTP 429). Free tier: wait 1–2 min, click Generate once (not Full publish). "
-        "Or folder ~/bravelgo-publish-texts/<package>/ + «Load texts from folder». "
-        f"Detail: {detail[:200]}"
+        "Gemini 429 (quota). Wait 5–10 min OR «Create stub texts» / texts folder / "
+        "uncheck Gemini in settings. Do not spam Generate. "
+        f"{detail[:180]}"
     )
 
 
@@ -134,10 +125,7 @@ def generate_listing(
         ACCOUNT_EMAIL=account_email,
         UNIQUE_SEED=seed or unique_seed(),
     )
-    m = (model or DEFAULT_MODEL).strip() or DEFAULT_MODEL
-    if log:
-        log(f"Gemini model: {m} (free tier — one request)")
-    raw = _call_gemini(api_key, prompt, model=m, log=log)
+    raw = _call_gemini(api_key, prompt, model=model, log=log)
     return parse_listing_output(raw, app_name)
 
 
@@ -153,7 +141,7 @@ def generate_privacy(
     model: str = "",
 ) -> str:
     if log:
-        log(f"Pause {PAUSE_BETWEEN_CALLS_SEC}s (free tier spacing)…")
+        log(f"Pause {PAUSE_BETWEEN_CALLS_SEC}s between listing and policy…")
     time.sleep(PAUSE_BETWEEN_CALLS_SEC)
     prompt = fill_prompt(
         template,
@@ -164,8 +152,7 @@ def generate_privacy(
         UNIQUE_SEED=seed or unique_seed(),
         DATE=date.today().isoformat(),
     )
-    m = (model or DEFAULT_MODEL).strip() or DEFAULT_MODEL
-    return _call_gemini(api_key, prompt, model=m, log=log).strip()
+    return _call_gemini(api_key, prompt, model=model, log=log).strip()
 
 
 def parse_listing_output(raw: str, app_name: str) -> dict[str, str]:

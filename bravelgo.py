@@ -128,6 +128,7 @@ def apply_locale(cp: dict, log=None) -> str:
 
 class App(ModernApp):
     def __init__(self, root: tk.Tk):
+        self._publish_start_mtx = threading.Lock()
         self.root = root
         self.root.title("BravelGo")
         self.cfg = cfg_load()
@@ -755,7 +756,8 @@ class App(ModernApp):
         tf = tk.Frame(gf, bg=C.SURFACE)
         tf.pack(fill="x", pady=(6, 0))
         self._btn(tf, "Create/open texts folder", self._publish_texts_folder, variant="ghost", side="left", padx=(0, 6))
-        self._btn(tf, "Load texts from folder", self._publish_load_texts, variant="ghost", side="left")
+        self._btn(tf, "Load texts from folder", self._publish_load_texts, variant="ghost", side="left", padx=(0, 6))
+        self._btn(tf, "Stub texts (no Gemini)", self._publish_stub_texts, variant="ghost", side="left")
 
         lp = self._card(scroll, "Listing prompt")
         self.txt_pub_listing_prompt = self._text(lp, height=5, mono=True, readonly=False)
@@ -791,14 +793,14 @@ class App(ModernApp):
         _update_wrap()
 
     def _publish_collect(self) -> dict:
-        from bravelgo.publish.config import merge_publish_config
+        from bravelgo.publish.config import merge_publish_config, normalize_gemini_model
 
         pub = merge_publish_config(self.cfg)
         pub["account_email"] = self.ent_pub_email.get().strip()
         pub["package_name"] = self.ent_pub_package.get().strip()
         pub["app_name"] = self.ent_pub_app.get().strip()
         pub["gemini_api_key"] = self.ent_pub_gemini.get().strip()
-        pub["gemini_model"] = self.combo_pub_gemini_model.get().strip()
+        pub["gemini_model"] = normalize_gemini_model(self.combo_pub_gemini_model.get().strip())
         pub["graphics_dir"] = self.ent_pub_graphics.get().strip()
         pub["texts_dir"] = self.ent_pub_texts_dir.get().strip()
         pub["use_local_texts_only"] = self.v_pub_local_only.get()
@@ -891,6 +893,24 @@ class App(ModernApp):
         self.log("Texts loaded from folder (Gemini not used)")
         self.set_status("Texts loaded", "ok")
 
+    def _publish_stub_texts(self):
+        from bravelgo.publish.cache_io import persist_texts
+        from bravelgo.publish.config import save_publish_section
+        from bravelgo.publish.stub_texts import stub_listing, stub_policy
+
+        pub = self._publish_collect()
+        app = pub.get("app_name", "").strip() or "App"
+        email = pub.get("account_email", "").strip()
+        listing = stub_listing(app)
+        policy = stub_policy(app, email)
+        pub["last_listing"] = listing
+        persist_texts(self.cfg, listing=listing, policy=policy, log=self.log)
+        save_publish_section(self.cfg, pub)
+        cfg_save(self.cfg)
+        self._publish_apply_results(pub)
+        self.log("Stub texts saved — you can Full publish without Gemini")
+        self.set_status("Stub texts ready", "ok")
+
     def _publish_busy(self) -> bool:
         from bravelgo.publish.lock_util import is_publish_running, read_lock_pid
 
@@ -929,13 +949,13 @@ class App(ModernApp):
         from bravelgo.publish.profile_resolve import resolve_profile_dir
         from bravelgo.publish.wait_console import clear_continue_flag
 
-        if getattr(self, "_publish_spawn_guard", False):
-            return
-        if is_publish_running():
-            self.log("Publish worker still active — Tail log")
-            return
-
-        self._publish_spawn_guard = True
+        with self._publish_start_mtx:
+            if getattr(self, "_publish_spawn_guard", False):
+                return
+            if is_publish_running():
+                self.log("Publish worker still active — Tail log")
+                return
+            self._publish_spawn_guard = True
         clear_stale_publish_lock(self.log)
 
         profile = self._active_profile_dir() or resolve_profile_dir(USER_HOME, self.cfg, self.log)

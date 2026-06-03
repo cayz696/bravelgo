@@ -16,6 +16,7 @@ from bravelgo.publish.console_flow import run_console_setup, run_create_applicat
 from bravelgo.publish.docs_flow import run_docs_flow
 from bravelgo.publish.gemini import GeminiPublishError, generate_listing, generate_privacy, unique_seed
 from bravelgo.publish.local_texts import try_load_local_texts
+from bravelgo.publish.stub_texts import stub_listing, stub_policy
 from bravelgo.publish.profile_resolve import resolve_profile_dir
 from bravelgo.publish.ui_actions import PublishUI
 from bravelgo.publish.wait_console import wait_for_console_ready
@@ -103,20 +104,23 @@ def _generate_texts(
             )
             log(f"Policy OK: {len(policy)} chars")
             persist_texts(cfg, policy=policy, log=log)
-    except GeminiPublishError:
+    except GeminiPublishError as exc:
         local_listing, local_policy = try_load_local_texts(package, app_name, texts_dir, log)
         listing = listing or local_listing
         policy = policy or local_policy
         if listing and policy:
             log("Gemini failed — using texts from folder")
             persist_texts(cfg, listing=listing, policy=policy, log=log)
-        elif listing:
+            return listing, policy
+        if pub.get("use_stub_on_quota", True):
+            log("Gemini 429 — saving basic English stub texts (edit later in Play Console)")
+            listing = listing or stub_listing(app_name)
+            policy = policy or stub_policy(app_name, email)
+            persist_texts(cfg, listing=listing, policy=policy, log=log)
+            return listing, policy
+        if listing:
             persist_texts(cfg, listing=listing, log=log)
-            raise ValueError(
-                "Listing saved; policy failed (429). Wait 2 min, Generate again, "
-                "or add policy.txt to texts folder."
-            ) from None
-        raise
+        raise ValueError(str(exc)) from exc
 
     if not listing or not policy:
         raise ValueError(

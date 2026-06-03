@@ -30,13 +30,30 @@ def default_publish_config() -> dict[str, Any]:
         "use_vision": True,
         "wait_for_console": True,
         "detached": True,
+        "use_stub_on_quota": True,
     }
+
+
+def normalize_gemini_model(model: str) -> str:
+    """2.0 models exhaust free quota faster — prefer 2.5-flash."""
+    m = (model or "").strip()
+    if not m or m.startswith("gemini-2.0"):
+        return "gemini-2.5-flash"
+    if m not in (
+        "gemini-2.5-flash",
+        "gemini-2.5-flash-lite",
+        "gemini-2.0-flash",
+        "gemini-2.0-flash-lite",
+    ):
+        return "gemini-2.5-flash"
+    return m
 
 
 def merge_publish_config(cfg: dict) -> dict[str, Any]:
     base = default_publish_config()
     raw = cfg.get("publish") if isinstance(cfg.get("publish"), dict) else {}
     base.update(raw)
+    base["gemini_model"] = normalize_gemini_model(base.get("gemini_model", ""))
     return base
 
 
