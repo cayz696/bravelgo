@@ -1,32 +1,23 @@
-"""Playwright + system Firefox (deb) + BravelGo Mozilla profile."""
+"""Selenium + system Firefox (deb) + BravelGo Mozilla profile — same stack as Warmup."""
 from __future__ import annotations
 
-import os
 import subprocess
 import time
-from typing import Callable
+from pathlib import Path
+from typing import Callable, Tuple
 
-from bravelgo.ff_profile import resolve_firefox_binary
-from bravelgo.publish.human import pause
+from bravelgo.publish.selenium_page import SeleniumPage
 
 
 def kill_firefox(log: Callable[[str], None] | None = None) -> None:
     if log:
-        log("Closing Firefox for Playwright profile lock…")
+        log("Closing other Firefox instances…")
     subprocess.run(
         "killall -9 firefox firefox-esr 2>/dev/null",
         shell=True,
         capture_output=True,
     )
-    time.sleep(2)
-
-
-def unlock_profile(profile_dir: str) -> None:
-    for name in ("lock", ".parentlock", "parent.lock"):
-        try:
-            os.remove(os.path.join(profile_dir, name))
-        except OSError:
-            pass
+    time.sleep(1.5)
 
 
 def launch_context(
@@ -34,63 +25,48 @@ def launch_context(
     log: Callable[[str], None],
     *,
     headless: bool = False,
-):
+    country: str = "FR",
+) -> Tuple[object, object, SeleniumPage]:
     """
-    Launch Firefox via Playwright persistent context using:
-    - Mozilla profile dir (cookies, 2FA session)
-    - System deb Firefox binary (/usr/lib/firefox/firefox), not snap
+    Returns (driver, driver, page) for compatibility with older runner code.
+    Opens a visible Firefox window on DISPLAY=:0.
     """
-    from playwright.sync_api import sync_playwright
+    if headless:
+        log("WARN: headless not used for publish — need visible desktop")
+
+    from bravelgo.core.warmup import _build_driver, _geckodriver, _system_firefox, _unlock_profile
+    from bravelgo.countries import country_profile
+    from bravelgo.proxy_geo import BRIDGE_PORT
 
     kill_firefox(log)
-    unlock_profile(profile_dir)
+    prof = Path(profile_dir)
+    _unlock_profile(prof)
 
-    firefox_bin = resolve_firefox_binary(log)
-    if not firefox_bin:
-        raise RuntimeError("System Firefox not found — Warmup → Reinstall Firefox")
+    gecko = _geckodriver(log)
+    if not gecko:
+        raise RuntimeError("geckodriver missing — Warmup → Reinstall Firefox")
 
-    log(f"Firefox binary: {firefox_bin}")
+    firefox_bin = _system_firefox(log) or ""
+    cp = country_profile((country or "FR").upper()[:2])
     log(f"Firefox profile: {profile_dir}")
+    log("Starting Firefox (Selenium) — window should appear on desktop…")
 
-    pw = sync_playwright().start()
-    launch_kw: dict = {
-        "user_data_dir": profile_dir,
-        "headless": headless,
-        "viewport": {"width": 1400, "height": 900},
-        "locale": "en-US",
-        "args": ["-no-remote"],
-        "firefox_user_prefs": {
-            "dom.webdriver.enabled": False,
-        },
-    }
-    if firefox_bin and "/snap/" not in firefox_bin:
-        launch_kw["executable_path"] = firefox_bin
-
+    driver = _build_driver(prof, firefox_bin, gecko, BRIDGE_PORT, cp, log)
     try:
-        context = pw.firefox.launch_persistent_context(**launch_kw)
-    except TypeError:
-        launch_kw.pop("executable_path", None)
-        log("WARN: executable_path unsupported — using Playwright Firefox")
-        context = pw.firefox.launch_persistent_context(**launch_kw)
-    except Exception as exc:
-        pw.stop()
-        raise RuntimeError(f"Firefox launch failed: {exc}") from exc
-
-    page = context.pages[0] if context.pages else context.new_page()
-    page.set_default_timeout(45_000)
-    page.set_default_navigation_timeout(60_000)
-    pause(1.0, 2.0)
-    log("Firefox ready (same profile as Launch Firefox / warmup)")
-    return pw, context, page
-
-
-def close_browser(pw, context, log: Callable[[str], None]) -> None:
-    try:
-        context.close()
+        driver.set_window_size(1400, 900)
     except Exception:
         pass
+
+    page = SeleniumPage(driver)
+    time.sleep(1.0)
+    log("Firefox ready (same profile as Launch Firefox / warmup)")
+    return driver, driver, page
+
+
+def close_browser(driver, _context, log: Callable[[str], None]) -> None:
     try:
-        pw.stop()
+        if driver is not None:
+            driver.quit()
     except Exception:
         pass
     log("Browser closed")

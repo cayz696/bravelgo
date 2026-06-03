@@ -670,7 +670,7 @@ class App(ModernApp):
 
         self._hint(
             self._card(scroll, "Play publish"),
-            "Firefox profile + proxy (user.js) · Playwright · Gemini Vision · detached log.",
+            "Firefox profile + proxy (user.js) · Selenium (like Warmup) · Gemini Vision · detached log.",
         )
 
         pf = self._card(scroll, "Firefox profile (auto)")
@@ -922,8 +922,8 @@ class App(ModernApp):
         cfg_save(self.cfg)
         self._publish_show_profile()
 
-        if step != "generate" and not ensure_publish_deps(self.log, REAL_USER):
-            self.set_status("Publish blocked — install Playwright", "idle")
+        if step != "generate" and not ensure_publish_deps(log=self.log, real_user=REAL_USER):
+            self.set_status("Publish blocked — Reinstall Firefox (Warmup)", "idle")
             return
 
         clear_continue_flag()
