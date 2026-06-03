@@ -167,13 +167,13 @@ def run_publish(
     api_key = pub.get("gemini_api_key", "").strip()
     use_vision = use_vision and bool(pub.get("use_vision", True))
     wait_console = wait_console and bool(pub.get("wait_for_console", True))
+    home = user_home or str(Path.home())
     skip_docs = should_skip_docs(pub, skip_docs, home=home)
     country = (cfg.get("country") or pub.get("country") or "FR").strip()
 
     if not email or not package or not app_name:
         raise ValueError("Publish: fill account email, package name, and app name")
 
-    home = user_home or str(Path.home())
     prof = (profile_dir or "").strip() or resolve_profile_dir(home, cfg, log)
     if not prof:
         raise ValueError("Firefox profile not found — run Full uniquify or Launch Firefox once")

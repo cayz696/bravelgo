@@ -1178,7 +1178,7 @@ class App(ModernApp):
         elif step == "console":
             self.log("Console = Firefox opens → Play Console (Continue when on Console)")
         else:
-            if pub.get("skip_docs_flow"):
+            if privacy_url or pub.get("skip_docs_flow"):
                 self.log("Full publish = Firefox → Console (your privacy URL, no Docs)")
             else:
                 self.log("Full publish = Firefox → Docs → Console")
