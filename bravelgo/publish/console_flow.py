@@ -8,6 +8,7 @@ from typing import Callable
 from bravelgo.publish.config import CONSOLE_URL
 from bravelgo.publish.human import pause, pause_long
 from bravelgo.publish import i18n
+from bravelgo.publish.page_guard import is_create_app_page, page_url
 from bravelgo.publish.ui_actions import PublishUI
 
 
@@ -95,6 +96,23 @@ def _fill_create_app_input(page, selector: str, fallback_index: int, text: str, 
         except Exception:
             continue
 
+    want_max = "30" if label == "app name" else "150" if label == "package name" else None
+    if want_max:
+        for el in visible:
+            try:
+                if (el.get_attribute("maxlength") or "") == want_max:
+                    el.click()
+                    pause(0.3, 0.7)
+                    try:
+                        el.clear()
+                    except Exception:
+                        pass
+                    el.send_keys(text)
+                    log(f"Create app: filled {label} (maxlength={want_max})")
+                    return
+            except Exception:
+                continue
+
     if fallback_index >= len(visible):
         raise TimeoutError(
             f"Create app field not found: {label}; visible inputs={len(visible)}"
@@ -122,6 +140,14 @@ def run_console_setup(
     ui: PublishUI,
 ) -> bool:
     log = ui.log
+
+    if is_create_app_page(page):
+        log(f"Stopped: still on Create app form ({page_url(page)[:80]})")
+        raise RuntimeError(
+            "Playbook order: finish «Create application» first (submit the form), "
+            "then open the app dashboard and click Continue again. "
+            "Privacy URL is filled only under «Set privacy policy» task — not on Create app."
+        )
 
     def _step(name: str, fn) -> None:
         try:
@@ -172,6 +198,9 @@ def _wait_stable(page) -> None:
 
 
 def _open_app_dashboard(page, package_name: str, ui: PublishUI) -> None:
+    if is_create_app_page(page):
+        ui.log("Skip dashboard search — still on Create app page")
+        return
     try:
         search = page.locator('input[placeholder*="Search"], input[aria-label*="Search"]').first
         search.fill(package_name)
@@ -205,13 +234,56 @@ def _open_task(page, pattern: re.Pattern[str], ui: PublishUI) -> None:
 
 
 def _task_privacy_policy(page, url: str, ui: PublishUI) -> None:
+    if is_create_app_page(page):
+        raise RuntimeError("Privacy policy task cannot run on Create app form")
     _open_task(page, i18n.PRIVACY_POLICY_TASK, ui)
-    try:
-        page.locator('input[type="url"]').first.fill(url, timeout=15_000)
-    except Exception:
-        page.locator("input").first.fill(url)
+    _fill_privacy_url_field(page, url, ui.log)
     pause(0.5, 1.0)
     ui.save()
+
+
+def _fill_privacy_url_field(page, url: str, log: Callable[[str], None]) -> None:
+    """Only privacy/URL fields — never input.first (that hits Application name on wrong page)."""
+    driver = getattr(page, "_driver", None)
+    if driver is not None:
+        try:
+            ok = driver.execute_script(
+                """
+                const url = arguments[0];
+                for (const inp of document.querySelectorAll('input[type="url"], input')) {
+                  if (inp.disabled || inp.type === 'checkbox' || inp.type === 'radio') continue;
+                  const r = inp.getBoundingClientRect();
+                  if (r.width < 2 || r.height < 2) continue;
+                  const label = (
+                    (inp.labels && inp.labels[0] && inp.labels[0].innerText) ||
+                    inp.getAttribute('aria-label') || ''
+                  ).toLowerCase();
+                  if (inp.type === 'url' || /privacy|politique|политик|confidential|confiden/.test(label)) {
+                    inp.focus();
+                    inp.value = url;
+                    inp.dispatchEvent(new Event('input', {bubbles: true}));
+                    inp.dispatchEvent(new Event('change', {bubbles: true}));
+                    return true;
+                  }
+                }
+                return false;
+                """,
+                url,
+            )
+            if ok:
+                log("Privacy URL filled (privacy field)")
+                return
+        except Exception as exc:
+            log(f"Privacy URL JS fill: {exc}")
+    try:
+        page.locator('input[type="url"]').first.fill(url, timeout=15_000)
+        log("Privacy URL filled (type=url)")
+        return
+    except Exception as exc:
+        log(f"Privacy URL input[type=url]: {exc}")
+    raise RuntimeError(
+        "Privacy URL field not found — open task «Set privacy policy» on app dashboard first"
+    )
 
 
 def _content_ratings(page, email: str, ui: PublishUI) -> None:

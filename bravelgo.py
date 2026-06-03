@@ -712,7 +712,7 @@ class App(ModernApp):
         self.v_pub_wait = tk.BooleanVar(value=bool(pub.get("wait_for_console", True)))
         self.v_pub_detached = tk.BooleanVar(value=bool(pub.get("detached", True)))
         for txt, var in (
-            ("App already in Console (skip create)", self.v_pub_app_exists),
+            ("App already in Console (skip Create — privacy only on dashboard)", self.v_pub_app_exists),
             ("Gemini Vision (any language)", self.v_pub_vision),
             ("Wait for Console + Continue button", self.v_pub_wait),
             ("Detached background (like Warmup)", self.v_pub_detached),

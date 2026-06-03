@@ -22,6 +22,7 @@ from bravelgo.publish.cache_io import load_listing_cache, load_policy_cache, lis
 from bravelgo.publish.stub_texts import stub_listing, stub_policy
 from bravelgo.publish.profile_resolve import resolve_profile_dir
 from bravelgo.publish.ui_actions import PublishUI
+from bravelgo.publish.page_guard import ensure_console_tab, is_create_app_page
 from bravelgo.publish.wait_console import wait_for_console_ready
 
 
@@ -241,6 +242,7 @@ def run_publish(
 
         if wait_console and step in ("all", "console"):
             wait_for_console_ready(page, log, open_console_hint=False)
+            ensure_console_tab(page, log)
             _ensure_app_page_after_continue(page, log)
 
         run_docs = step in ("all", "docs") and not skip_docs
@@ -263,8 +265,24 @@ def run_publish(
             privacy_url = result.get("privacy_url") or privacy_url_from_pub(pub)
             if not privacy_url:
                 raise ValueError("No privacy URL — paste link in Publish tab")
-            if not skip_create and not pub.get("app_already_exists"):
+
+            skip_create_app = skip_create or bool(pub.get("app_already_exists"))
+            if skip_create_app:
+                log(
+                    "Playbook step 1/2 SKIPPED: «App already in Console» is ON — "
+                    "Create application will NOT run"
+                )
+                if is_create_app_page(page):
+                    raise RuntimeError(
+                        "You are on «Create application» but «App already in Console» is checked. "
+                        "Uncheck it so BravelGo can fill app name/package and submit Create, "
+                        "OR finish Create manually, open the app dashboard, then Continue."
+                    )
+            else:
+                log("Playbook step 1/2: Create application (name + package — NOT privacy URL)")
                 run_create_application(page, app_name, package, ui)
+                log("Playbook step 2/2: Console dashboard tasks (privacy URL is task #1 there)")
+
             try:
                 run_console_setup(
                     page,
@@ -280,7 +298,7 @@ def run_publish(
 
                 log(f"Console automation error: {exc}")
                 log(traceback.format_exc()[-800:])
-                raise
+                log("Finish remaining Console steps manually in the open Firefox window")
         completed = True
     finally:
         if completed:
