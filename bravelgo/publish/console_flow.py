@@ -356,10 +356,27 @@ def _select_default_language_en_us(page, ui: PublishUI) -> None:
 
 def _check_all_declaration_boxes(page, log: Callable[[str], None]) -> None:
     try:
+        driver = getattr(page, "_driver", None)
+        if driver is not None:
+            checked = driver.execute_script(
+                """
+                let count = 0;
+                for (const cb of document.querySelectorAll('input[type="checkbox"]')) {
+                  if (cb.disabled || cb.checked) continue;
+                  cb.scrollIntoView({block:'center', inline:'nearest'});
+                  cb.click();
+                  count++;
+                }
+                return count;
+                """
+            )
+            log(f"Declaration checkboxes checked: {checked}")
+            pause(0.5, 1.0)
+            return
         boxes = page.locator('input[type="checkbox"]')
         for i in range(boxes.count()):
             cb = boxes.nth(i)
-            if cb.is_visible() and not cb.is_checked():
+            if not cb.is_checked():
                 cb.check()
                 pause(0.2, 0.5)
     except Exception as exc:

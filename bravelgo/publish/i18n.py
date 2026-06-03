@@ -7,7 +7,8 @@ import re
 
 
 def _pat(labels: list[str]) -> re.Pattern[str]:
-    esc = [re.escape(l) for l in labels]
+    # Labels like "^Game$" are intentional regexes; plain labels stay escaped.
+    esc = [l if l.startswith("^") or l.endswith("$") else re.escape(l) for l in labels]
     return re.compile("|".join(esc), re.I)
 
 
@@ -45,7 +46,7 @@ STORE_LISTING = _pat([
 EDIT = _pat(["Edit", "Изменить", "Редагувати"])
 ARCADE = _pat(["Arcade", "Аркады", "Аркада"])
 GAME = _pat(["^Game$", "Игра", "Гра"])
-FREE = _pat(["For free", "Бесплатно", "Безкоштовно"])
+FREE = _pat(["For free", "^Free$", "Бесплатно", "Безкоштовно"])
 NO = _pat(["^No$", "Нет", "Ні"])
 YES_ALL_FUNCTIONALITY = _pat([
     "All functionality in my app is available without any access restrictions",

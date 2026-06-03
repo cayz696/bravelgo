@@ -49,6 +49,13 @@ class SeleniumLocator:
     def first(self) -> SeleniumLocator:
         return self
 
+    @property
+    def last(self) -> SeleniumLocator:
+        return _IndexedLocator(self._driver, self, -1)
+
+    def nth(self, index: int) -> SeleniumLocator:
+        return _IndexedLocator(self._driver, self, index)
+
     def count(self) -> int:
         return len(self._elements())
 
@@ -90,6 +97,18 @@ class SeleniumLocator:
         el = self._wait_one(10_000)
         if not el.is_selected():
             el.click()
+
+    def is_visible(self) -> bool:
+        try:
+            return self._wait_one(1000).is_displayed()
+        except Exception:
+            return False
+
+    def is_checked(self) -> bool:
+        try:
+            return self._wait_one(1000).is_selected()
+        except Exception:
+            return False
 
     def input_value(self) -> str:
         el = self._wait_one(5_000)
@@ -154,6 +173,22 @@ class _FilteredLocator(SeleniumLocator):
                         out.append(sub)
                         break
         return out
+
+
+class _IndexedLocator(SeleniumLocator):
+    def __init__(self, driver, parent: SeleniumLocator, index: int):
+        super().__init__(driver, root=None)
+        self._parent = parent
+        self._index = index
+
+    def _elements(self) -> list:
+        els = self._parent._elements()
+        if not els:
+            return []
+        try:
+            return [els[self._index]]
+        except IndexError:
+            return []
 
 
 def _text_selector_xpath(spec: str) -> str:
