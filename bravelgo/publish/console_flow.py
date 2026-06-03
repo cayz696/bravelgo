@@ -122,35 +122,44 @@ def run_console_setup(
     ui: PublishUI,
 ) -> bool:
     log = ui.log
-    _open_app_dashboard(page, package_name, ui)
-    _expand_setup_tasks(page, ui)
-    _task_privacy_policy(page, privacy_url, ui)
-    _return_dashboard(page, ui)
 
-    _open_task(page, i18n.APP_ACCESS, ui)
-    ui.click_radio_text(i18n.YES_ALL_FUNCTIONALITY, "All functionality available without restrictions")
-    ui.save()
-    _return_dashboard(page, ui)
+    def _step(name: str, fn) -> None:
+        try:
+            fn()
+        except Exception as exc:
+            log(f"Task skipped ({name}): {str(exc)[:120]}")
+        try:
+            _return_dashboard(page, ui)
+        except Exception:
+            pass
 
-    _open_task(page, i18n.ADS, ui)
-    ui.click_radio_text(i18n.NO_ADS, "No ads")
-    ui.save()
-    _return_dashboard(page, ui)
+    _step("open app dashboard", lambda: _open_app_dashboard(page, package_name, ui))
+    _step("expand setup tasks", lambda: _expand_setup_tasks(page, ui))
+    _step("privacy policy", lambda: _task_privacy_policy(page, privacy_url, ui))
 
-    _content_ratings(page, account_email, ui)
-    _return_dashboard(page, ui)
+    def _app_access():
+        _open_task(page, i18n.APP_ACCESS, ui)
+        ui.click_radio_text(i18n.YES_ALL_FUNCTIONALITY, "All functionality available without restrictions")
+        ui.save()
 
-    _target_audience(page, ui)
-    _return_dashboard(page, ui)
+    def _ads():
+        _open_task(page, i18n.ADS, ui)
+        ui.click_radio_text(i18n.NO_ADS, "No ads")
+        ui.save()
 
-    _data_safety_and_compliance(page, ui)
-    _return_dashboard(page, ui)
+    _step("app access", _app_access)
+    _step("ads", _ads)
+    _step("content ratings", lambda: _content_ratings(page, account_email, ui))
+    _step("target audience", lambda: _target_audience(page, ui))
+    _step("data safety / compliance", lambda: _data_safety_and_compliance(page, ui))
+    _step("store settings", lambda: _store_settings(page, account_email, ui))
 
-    _store_settings(page, account_email, ui)
-    _return_dashboard(page, ui)
+    try:
+        _default_store_listing(page, listing, graphics_dir, ui)
+    except Exception as exc:
+        log(f"Task skipped (store listing): {str(exc)[:120]}")
 
-    _default_store_listing(page, listing, graphics_dir, ui)
-    log("Console setup complete — review manually before production")
+    log("Console setup pass complete — REVIEW each section manually before production")
     return True
 
 

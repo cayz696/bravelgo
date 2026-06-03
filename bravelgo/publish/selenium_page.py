@@ -5,11 +5,26 @@ import re
 import time
 from typing import Any, Pattern
 
+from selenium.common.exceptions import WebDriverException
 from selenium.webdriver.common.action_chains import ActionChains
 from selenium.webdriver.common.by import By
 from selenium.webdriver.common.keys import Keys
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.support.ui import WebDriverWait
+
+
+def _safe_find(ctx, by, value) -> list:
+    """find_elements that survives transient 'Failed to decode response from marionette'."""
+    for attempt in range(2):
+        try:
+            return ctx.find_elements(by, value)
+        except WebDriverException:
+            if attempt == 0:
+                time.sleep(0.8)
+                continue
+            return []
+    return []
+
 
 _ROLE_TAGS = {
     "button": "button",
@@ -90,7 +105,22 @@ class SeleniumLocator:
 
     def fill(self, text: str, timeout: int = 10_000) -> None:
         el = self._wait_one(timeout)
-        el.clear()
+        try:
+            if not el.is_enabled():
+                self._driver.execute_script(
+                    "arguments[0].value = arguments[1];"
+                    "arguments[0].dispatchEvent(new Event('input', {bubbles:true}));"
+                    "arguments[0].dispatchEvent(new Event('change', {bubbles:true}));",
+                    el,
+                    text,
+                )
+                return
+        except WebDriverException:
+            pass
+        try:
+            el.clear()
+        except WebDriverException:
+            pass
         el.send_keys(text)
 
     def check(self) -> None:
@@ -125,17 +155,16 @@ class SeleniumLocator:
         )
 
     def _elements(self) -> list:
-        drv = self._driver
         if self._root is not None:
             if self._css:
-                return self._root.find_elements(By.CSS_SELECTOR, self._css)
+                return _safe_find(self._root, By.CSS_SELECTOR, self._css)
             if self._xpath:
-                return self._root.find_elements(By.XPATH, self._xpath)
+                return _safe_find(self._root, By.XPATH, self._xpath)
             return [self._root]
         if self._css:
-            return drv.find_elements(By.CSS_SELECTOR, self._css)
+            return _safe_find(self._driver, By.CSS_SELECTOR, self._css)
         if self._xpath:
-            return drv.find_elements(By.XPATH, self._xpath)
+            return _safe_find(self._driver, By.XPATH, self._xpath)
         return []
 
     def _wait_one(self, timeout: int):

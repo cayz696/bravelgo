@@ -10,6 +10,9 @@ from typing import Any, Callable
 
 VISION_MODEL = "gemini-2.0-flash"
 
+# Once Gemini Vision returns 429/quota, stop calling it for the rest of the run.
+_VISION_DISABLED = False
+
 
 class VisionError(Exception):
     pass
@@ -78,7 +81,8 @@ def vision_act(
     Screenshot → Gemini → click by coordinates or Playwright text/role.
     Returns True if an action was performed.
     """
-    if not api_key:
+    global _VISION_DISABLED
+    if not api_key or _VISION_DISABLED:
         return False
     try:
         png = page.screenshot(type="png", full_page=False)
@@ -110,7 +114,12 @@ Use x,y only if no clear text. action "none" if impossible."""
     try:
         plan = _call_vision(api_key, prompt, png)
     except VisionError as exc:
-        log(f"Vision: {exc}")
+        msg = str(exc)
+        if "429" in msg or "quota" in msg.lower():
+            _VISION_DISABLED = True
+            log("Vision quota exhausted (429) — disabling Vision for this run")
+        else:
+            log(f"Vision: {exc}")
         return False
 
     action = (plan.get("action") or "none").lower()
