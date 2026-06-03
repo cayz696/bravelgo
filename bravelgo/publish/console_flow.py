@@ -28,10 +28,24 @@ def run_create_application(
     pause_long()
     _wait_stable(page)
 
-    page.locator('input[aria-label*="Application name"], input[maxlength="30"]').first.fill(app_name[:30])
-    pause(0.5, 1.0)
-    page.locator('input[aria-label*="Package"], input[maxlength="150"]').first.fill(package_name)
-    pause(0.8, 1.5)
+    _fill_create_app_input(
+        page,
+        'input[aria-label*="Application name"], input[maxlength="30"]',
+        0,
+        app_name[:30],
+        "app name",
+        log,
+    )
+    pause(0.8, 1.4)
+    _fill_create_app_input(
+        page,
+        'input[aria-label*="Package"], input[maxlength="150"]',
+        1,
+        package_name,
+        "package name",
+        log,
+    )
+    pause(1.0, 1.8)
     ui.click_button(i18n.CHECK_AVAIL, "Check package availability")
     pause(1.5, 3.0)
     try:
@@ -49,6 +63,52 @@ def run_create_application(
     pause_long()
     log("Create application submitted")
     return True
+
+
+def _fill_create_app_input(page, selector: str, fallback_index: int, text: str, label: str, log) -> None:
+    """
+    Play Console Material inputs often lack stable aria-labels.
+    Prefer the semantic selector, then fall back to visible text inputs by order.
+    """
+    try:
+        page.locator(selector).first.fill(text, timeout=8000)
+        log(f"Create app: filled {label}")
+        return
+    except Exception as exc:
+        log(f"Create app: selector fill failed for {label}: {exc}")
+
+    driver = getattr(page, "_driver", None)
+    if driver is None:
+        raise TimeoutError(f"Create app field not found: {label}")
+
+    from selenium.webdriver.common.by import By
+
+    candidates = driver.find_elements(
+        By.CSS_SELECTOR,
+        "input:not([type='hidden']):not([type='radio']):not([type='checkbox']), textarea",
+    )
+    visible = []
+    for el in candidates:
+        try:
+            if el.is_displayed() and el.is_enabled():
+                visible.append(el)
+        except Exception:
+            continue
+
+    if fallback_index >= len(visible):
+        raise TimeoutError(
+            f"Create app field not found: {label}; visible inputs={len(visible)}"
+        )
+
+    el = visible[fallback_index]
+    el.click()
+    pause(0.3, 0.7)
+    try:
+        el.clear()
+    except Exception:
+        pass
+    el.send_keys(text)
+    log(f"Create app: filled {label} (visible input #{fallback_index + 1})")
 
 
 def run_console_setup(
