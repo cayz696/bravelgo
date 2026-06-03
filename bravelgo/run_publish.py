@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import argparse
-import fcntl
 import json
 import os
 import sys
@@ -13,11 +12,11 @@ BASE = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(BASE))
 
 from bravelgo.publish.config import merge_publish_config  # noqa: E402
+from bravelgo.publish.lock_util import release_lock, try_acquire_lock  # noqa: E402
 from bravelgo.publish.runner import run_publish  # noqa: E402
 
 CONFIG_F = Path.home() / ".bravelgo.json"
 LOG_F = Path.home() / ".bravelgo-publish.log"
-LOCK_F = Path.home() / ".bravelgo-publish.lock"
 
 
 def load_cfg() -> dict:
@@ -30,19 +29,6 @@ def load_cfg() -> dict:
 def save_cfg(cfg: dict) -> None:
     with open(CONFIG_F, "w", encoding="utf-8") as f:
         json.dump(cfg, f, ensure_ascii=False, indent=2)
-
-
-def _acquire_lock() -> object | None:
-    LOCK_F.parent.mkdir(parents=True, exist_ok=True)
-    fh = open(LOCK_F, "w", encoding="utf-8")
-    try:
-        fcntl.flock(fh.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
-    except BlockingIOError:
-        fh.close()
-        return None
-    fh.write(f"pid={os.getpid()}\n")
-    fh.flush()
-    return fh
 
 
 def main() -> None:
@@ -58,9 +44,14 @@ def main() -> None:
     parser.add_argument("--no-vision", action="store_true")
     args = parser.parse_args()
 
-    lock = _acquire_lock()
+    lock, err = try_acquire_lock()
     if lock is None:
-        print("[*] FATAL: Another publish is already running — wait or Tail log", flush=True)
+        print(f"[*] FATAL: {err}", flush=True)
+        try:
+            with open(LOG_F, "a", encoding="utf-8") as f:
+                f.write(f"[*] FATAL: {err}\n")
+        except OSError:
+            pass
         sys.exit(2)
 
     cfg = load_cfg()
@@ -92,7 +83,8 @@ def main() -> None:
         "console": "Opens Firefox → Play Console (needs cached texts)",
         "all": "Opens Firefox → wait Console → Docs → Console (NO Gemini)",
     }
-    LOG_F.write_text(f"=== Publish {args.step} ===\n", encoding="utf-8")
+    LOG_F.write_text(f"=== Publish {args.step} · pid={os.getpid()} ===\n", encoding="utf-8")
+    log(f"Worker started · step={args.step} · pid={os.getpid()}")
     log(STEP_NOTE.get(args.step, args.step))
     log(f"Package: {pub.get('package_name')} · App: {pub.get('app_name')}")
 
@@ -115,12 +107,7 @@ def main() -> None:
         log(f"FATAL: {exc}")
         sys.exit(1)
     finally:
-        try:
-            fcntl.flock(lock.fileno(), fcntl.LOCK_UN)
-            lock.close()
-            LOCK_F.unlink(missing_ok=True)
-        except OSError:
-            pass
+        release_lock(lock)
 
 
 if __name__ == "__main__":

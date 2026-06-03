@@ -891,23 +891,52 @@ class App(ModernApp):
         self.log("Texts loaded from folder (Gemini not used)")
         self.set_status("Texts loaded", "ok")
 
+    def _publish_busy(self) -> bool:
+        from bravelgo.publish.lock_util import is_publish_running, read_lock_pid
+
+        if getattr(self, "_publish_spawn_guard", False):
+            return True
+        if is_publish_running():
+            pid = read_lock_pid()
+            self.log(f"Publish already running (pid {pid or '?'}) — Tail log, do not click again")
+            return True
+        return False
+
     def _publish_thread_generate(self):
+        if self._publish_busy():
+            return
         threading.Thread(target=lambda: self._publish_run(step="generate"), daemon=True).start()
 
     def _publish_thread_docs(self):
+        if self._publish_busy():
+            return
         threading.Thread(target=lambda: self._publish_run(step="docs"), daemon=True).start()
 
     def _publish_thread_console(self):
+        if self._publish_busy():
+            return
         threading.Thread(target=lambda: self._publish_run(step="console"), daemon=True).start()
 
     def _publish_thread_full(self):
+        if self._publish_busy():
+            return
         threading.Thread(target=lambda: self._publish_run(step="all"), daemon=True).start()
 
     def _publish_run(self, step: str = "all"):
         from bravelgo.publish.config import save_publish_section
         from bravelgo.publish.deps import ensure_publish_deps
+        from bravelgo.publish.lock_util import clear_stale_publish_lock, is_publish_running
         from bravelgo.publish.profile_resolve import resolve_profile_dir
         from bravelgo.publish.wait_console import clear_continue_flag
+
+        if getattr(self, "_publish_spawn_guard", False):
+            return
+        if is_publish_running():
+            self.log("Publish worker still active — Tail log")
+            return
+
+        self._publish_spawn_guard = True
+        clear_stale_publish_lock(self.log)
 
         profile = self._active_profile_dir() or resolve_profile_dir(USER_HOME, self.cfg, self.log)
         if not profile:
@@ -918,6 +947,7 @@ class App(ModernApp):
                     "Firefox profile not found — run Full uniquify or Launch Firefox once",
                 ),
             )
+            self._publish_spawn_guard = False
             return
 
         pub = self._publish_collect()
@@ -927,6 +957,7 @@ class App(ModernApp):
 
         if step != "generate" and not ensure_publish_deps(log=self.log, real_user=REAL_USER):
             self.set_status("Publish blocked — Reinstall Firefox (Warmup)", "idle")
+            self._publish_spawn_guard = False
             return
 
         clear_continue_flag()
@@ -962,27 +993,22 @@ class App(ModernApp):
         detached = pub.get("detached", True)
 
         try:
-            with open(log_path, "w", encoding="utf-8") as lf:
-                lf.write(f"Publish {step} · detached={detached}\n")
-            _run(f"chown {REAL_USER}:{REAL_USER} '{log_path}'")
+            _run(f"chown {REAL_USER}:{REAL_USER} '{log_path}' 2>/dev/null; rm -f '{USER_HOME}/.bravelgo-publish.lock'")
 
             if detached:
-                with open(log_path, "a", encoding="utf-8") as lf:
-                    proc = subprocess.Popen(
-                        cmd,
-                        stdout=lf,
-                        stderr=subprocess.STDOUT,
-                        text=True,
-                        start_new_session=True,
-                    )
-                self.log(f"Detached PID {proc.pid} → {log_path}")
+                proc = subprocess.Popen(
+                    cmd,
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                    start_new_session=True,
+                )
+                self.log(f"Detached worker → {log_path} (launcher pid {proc.pid})")
                 if step == "generate":
-                    self.log("Tail log — when done, click «▶ Full publish» to open Firefox")
+                    self.log("Gemini may take 1–3 min on free tier — Tail log, do not click Generate again")
                 else:
-                    self.log("Firefox will open — go to Play Console, then «Continue — on Console»")
-                    self.log("Tail log for progress")
+                    self.log("Firefox will open — Play Console, then «Continue — on Console»")
                 self.set_status("Publish detached", "ok")
-                self.root.after(8000, self._publish_tail_log)
+                self._publish_poll_until_done()
                 return
 
             proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
@@ -1002,6 +1028,20 @@ class App(ModernApp):
         except Exception as exc:
             self.log(f"Publish error: {exc}")
             self.set_status("Publish error", "idle")
+        finally:
+            self._publish_spawn_guard = False
+
+    def _publish_poll_until_done(self):
+        from bravelgo.publish.lock_util import is_publish_running
+
+        if is_publish_running():
+            self.root.after(4000, self._publish_poll_until_done)
+            return
+        self._publish_spawn_guard = False
+        self._publish_tail_log()
+        self.cfg = cfg_load()
+        self._publish_apply_results(self.cfg.get("publish", {}))
+        self.set_status("Publish finished — check Tail log", "ok")
 
     def _publish_apply_results(self, pub: dict):
         url = pub.get("last_privacy_url", "")
