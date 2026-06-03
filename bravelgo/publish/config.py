@@ -56,10 +56,7 @@ def merge_publish_config(cfg: dict) -> dict[str, Any]:
     raw = cfg.get("publish") if isinstance(cfg.get("publish"), dict) else {}
     base.update(raw)
     base["gemini_model"] = normalize_gemini_model(base.get("gemini_model", ""))
-    # Default skip Docs when user has a privacy URL (manual workflow)
-    if (base.get("last_privacy_url") or "").strip():
-        base["skip_docs_flow"] = True
-    elif "skip_docs_flow" not in raw:
+    if "skip_docs_flow" not in raw:
         base["skip_docs_flow"] = True
     return base
 

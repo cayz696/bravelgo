@@ -890,7 +890,7 @@ class App(ModernApp):
         pub["wait_for_console"] = self.v_pub_wait.get()
         pub["detached"] = self.v_pub_detached.get()
         pub["last_privacy_url"] = self.ent_pub_privacy_url.get().strip()
-        pub["skip_docs_flow"] = self.v_pub_skip_docs.get() or bool(pub["last_privacy_url"])
+        pub["skip_docs_flow"] = self.v_pub_skip_docs.get()
         pub["manual_policy_text"] = self.txt_pub_policy.get("1.0", tk.END).strip()
         title = self.ent_pub_title.get().strip() or pub["app_name"]
         pub["last_listing"] = {
@@ -918,7 +918,7 @@ class App(ModernApp):
         from bravelgo.publish.manual_io import save_manual_to_cache
 
         pub = self._publish_collect()
-        save_manual_to_cache(self.cfg, pub, log=self.log)
+        save_manual_to_cache(self.cfg, pub, log=self.log, user_home=USER_HOME)
         save_publish_section(self.cfg, pub)
         cfg_save(self.cfg)
         self._publish_update_char_labels()
@@ -951,7 +951,7 @@ class App(ModernApp):
         from bravelgo.publish.manual_io import save_manual_to_cache
 
         pub = self._publish_collect()
-        save_manual_to_cache(self.cfg, pub, log=None)
+        save_manual_to_cache(self.cfg, pub, log=None, user_home=USER_HOME)
         save_publish_section(self.cfg, pub)
         cfg_save(self.cfg)
         self._publish_update_char_labels()
@@ -1028,7 +1028,7 @@ class App(ModernApp):
         listing = stub_listing(app)
         policy = stub_policy(app, email)
         pub["last_listing"] = listing
-        persist_texts(self.cfg, listing=listing, policy=policy, log=self.log)
+        persist_texts(self.cfg, listing=listing, policy=policy, log=self.log, user_home=USER_HOME)
         save_publish_section(self.cfg, pub)
         cfg_save(self.cfg)
         self._publish_apply_results(pub)
@@ -1097,7 +1097,7 @@ class App(ModernApp):
         pub = self._publish_collect()
         from bravelgo.publish.manual_io import save_manual_to_cache
 
-        save_manual_to_cache(self.cfg, pub, log=None)
+        save_manual_to_cache(self.cfg, pub, log=None, user_home=USER_HOME)
         save_publish_section(self.cfg, pub)
         cfg_save(self.cfg)
         self._publish_show_profile()
@@ -1111,9 +1111,6 @@ class App(ModernApp):
 
         stop_publish_workers(self.log)
         clear_continue_flag()
-
-        if pub.get("last_privacy_url"):
-            pub["skip_docs_flow"] = True
 
         self.log(f"Publish start · step={step} · {pub.get('package_name')}")
         self.log(f"Profile: {profile}")
@@ -1132,12 +1129,15 @@ class App(ModernApp):
 
         script = os.path.join(BASE_DIR, "bravelgo", "run_publish.py")
         log_path = f"{USER_HOME}/.bravelgo-publish.log"
+        privacy_url = pub.get("last_privacy_url", "").strip()
         cmd = [
             "sudo", "-u", REAL_USER,
             "env", "DISPLAY=:0", f"HOME={USER_HOME}",
             "python3", script,
             "--profile-dir", profile,
             "--step", step,
+            "--user-home", USER_HOME,
+            "--privacy-url", privacy_url,
         ]
         if pub.get("app_already_exists"):
             cmd.append("--skip-create")
@@ -1145,7 +1145,7 @@ class App(ModernApp):
             cmd.append("--no-vision")
         if not pub.get("wait_for_console", True):
             cmd.append("--no-wait-console")
-        if pub.get("skip_docs_flow") or pub.get("last_privacy_url"):
+        if pub.get("skip_docs_flow"):
             cmd.append("--skip-docs")
 
         detached = pub.get("detached", True)
@@ -1153,7 +1153,12 @@ class App(ModernApp):
         try:
             save_publish_section(self.cfg, pub)
             cfg_save(self.cfg)
-            _run(f"chown {REAL_USER}:{REAL_USER} '{log_path}' 2>/dev/null; rm -f '{USER_HOME}/.bravelgo-publish.lock'")
+            _run(
+                f"chown {REAL_USER}:{REAL_USER} '{CONFIG_F}' '{log_path}' "
+                f"'{USER_HOME}/.bravelgo-publish-listing.json' "
+                f"'{USER_HOME}/.bravelgo-publish-policy.txt' 2>/dev/null; "
+                f"rm -f '{USER_HOME}/.bravelgo-publish.lock'"
+            )
 
             if detached:
                 proc = subprocess.Popen(

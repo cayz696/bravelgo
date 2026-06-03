@@ -17,21 +17,33 @@ def listing_from_pub(pub: dict, app_name: str = "") -> dict[str, str]:
     }
 
 
-def policy_from_pub(pub: dict) -> str:
+def policy_from_pub(pub: dict, home: str | None = None) -> str:
     text = (pub.get("manual_policy_text") or "").strip()
     if text:
         return text
-    return load_policy_cache() or ""
+    return load_policy_cache(home) or ""
 
 
 def privacy_url_from_pub(pub: dict) -> str:
     return (pub.get("last_privacy_url") or "").strip()
 
 
-def save_manual_to_cache(cfg: dict, pub: dict, log: Callable[[str], None] | None = None) -> None:
+def save_manual_to_cache(
+    cfg: dict,
+    pub: dict,
+    log: Callable[[str], None] | None = None,
+    *,
+    user_home: str | None = None,
+) -> None:
     listing = listing_from_pub(pub, pub.get("app_name", ""))
-    policy = policy_from_pub(pub)
-    persist_texts(cfg, listing=listing if listing_ready(listing) else None, policy=policy or None, log=log)
+    policy = policy_from_pub(pub, user_home)
+    persist_texts(
+        cfg,
+        listing=listing if listing_ready(listing) else None,
+        policy=policy or None,
+        log=log,
+        user_home=user_home,
+    )
 
 
 def validate_for_browser_step(pub: dict, step: str) -> None:
@@ -43,7 +55,7 @@ def validate_for_browser_step(pub: dict, step: str) -> None:
         )
 
     url = privacy_url_from_pub(pub)
-    skip_docs = bool(pub.get("skip_docs_flow")) or bool(url)
+    skip_docs = bool(pub.get("skip_docs_flow"))
 
     if step in ("all", "console") and not url:
         raise ValueError(

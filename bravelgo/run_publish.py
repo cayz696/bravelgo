@@ -13,21 +13,27 @@ sys.path.insert(0, str(BASE))
 
 from bravelgo.publish.config import merge_publish_config  # noqa: E402
 from bravelgo.publish.lock_util import release_lock, try_acquire_lock  # noqa: E402
+from bravelgo.publish.paths import config_path, publish_log_path  # noqa: E402
 from bravelgo.publish.runner import run_publish  # noqa: E402
 
-CONFIG_F = Path.home() / ".bravelgo.json"
-LOG_F = Path.home() / ".bravelgo-publish.log"
+LOG_F = publish_log_path()
 
 
-def load_cfg() -> dict:
-    if CONFIG_F.is_file():
-        with open(CONFIG_F, encoding="utf-8") as f:
+def _home_from_args(args) -> str:
+    return (getattr(args, "user_home", None) or os.environ.get("HOME") or str(Path.home())).strip()
+
+
+def load_cfg(home: str) -> dict:
+    path = config_path(home)
+    if path.is_file():
+        with open(path, encoding="utf-8") as f:
             return json.load(f)
     return {}
 
 
-def save_cfg(cfg: dict) -> None:
-    with open(CONFIG_F, "w", encoding="utf-8") as f:
+def save_cfg(cfg: dict, home: str) -> None:
+    path = config_path(home)
+    with open(path, "w", encoding="utf-8") as f:
         json.dump(cfg, f, ensure_ascii=False, indent=2)
 
 
@@ -42,30 +48,30 @@ def main() -> None:
     parser.add_argument("--skip-create", action="store_true")
     parser.add_argument("--no-wait-console", action="store_true")
     parser.add_argument("--no-vision", action="store_true")
-    parser.add_argument(
-        "--skip-docs",
-        action="store_true",
-        help="Use privacy URL from settings — do not open Google Docs",
-    )
+    parser.add_argument("--skip-docs", action="store_true")
+    parser.add_argument("--privacy-url", default="", help="Privacy URL from BravelGo form (required)")
+    parser.add_argument("--user-home", default="", help="Desktop user home, e.g. /home/ahmed")
     args = parser.parse_args()
 
+    home = _home_from_args(args)
+    os.environ["HOME"] = home
+    global LOG_F
+    LOG_F = publish_log_path(home)
+
     from bravelgo.publish.lock_util import stop_publish_workers
-    from bravelgo.publish.manual_io import privacy_url_from_pub
 
     stop_publish_workers()
 
     lock, err = try_acquire_lock()
     if lock is None:
         print(f"[*] FATAL: {err}", flush=True)
-        try:
-            with open(LOG_F, "a", encoding="utf-8") as f:
-                f.write(f"[*] FATAL: {err}\n")
-        except OSError:
-            pass
         sys.exit(2)
 
-    cfg = load_cfg()
+    cfg = load_cfg(home)
     pub = merge_publish_config(cfg)
+    if args.privacy_url.strip():
+        pub["last_privacy_url"] = args.privacy_url.strip()
+        cfg["publish"] = pub
     if args.skip_create:
         pub["app_already_exists"] = True
         cfg["publish"] = pub
@@ -87,32 +93,26 @@ def main() -> None:
         except OSError:
             pass
 
-    STEP_NOTE = {
-        "generate": "NO Firefox — only Gemini API → saves listing + policy to cache",
-        "docs": "Opens Firefox → Google Docs → privacy URL (needs cached texts)",
-        "console": "Opens Firefox → Play Console (needs cached texts)",
-        "all": "Opens Firefox → wait Console → Docs → Console (NO Gemini)",
-    }
-    LOG_F.write_text(f"=== Publish {args.step} · pid={os.getpid()} ===\n", encoding="utf-8")
+    LOG_F.write_text(f"=== Publish {args.step} · pid={os.getpid()} · home={home} ===\n", encoding="utf-8")
     log(f"Worker started · step={args.step} · pid={os.getpid()}")
-    log(STEP_NOTE.get(args.step, args.step))
-    log(f"Package: {pub.get('package_name')} · App: {pub.get('app_name')}")
+    if pub.get("last_privacy_url"):
+        log(f"Privacy URL: {pub['last_privacy_url'][:90]}…")
+    else:
+        log("WARN: Privacy URL empty in worker — paste in BravelGo and Save manual texts")
 
     try:
         result = run_publish(
             args.profile_dir or None,
             cfg,
             log,
-            user_home=os.environ.get("HOME", str(Path.home())),
+            user_home=home,
             step=args.step,
             skip_create=args.skip_create or pub.get("app_already_exists", False),
             wait_console=not args.no_wait_console,
             use_vision=not args.no_vision,
-            skip_docs=args.skip_docs
-            or bool(pub.get("skip_docs_flow"))
-            or bool(privacy_url_from_pub(pub)),
+            skip_docs=args.skip_docs or bool(pub.get("skip_docs_flow")),
         )
-        save_cfg(cfg)
+        save_cfg(cfg, home)
         if result.get("privacy_url"):
             log(f"Privacy URL: {result['privacy_url']}")
         log("Done")

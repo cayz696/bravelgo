@@ -1,13 +1,11 @@
-"""Persist publish texts so Generate survives 429 and Full publish skips Gemini."""
+"""Persist publish texts — always under desktop user HOME, not /root."""
 from __future__ import annotations
 
 import json
-from pathlib import Path
-from typing import Any, Callable
+import os
+from typing import Callable
 
-POLICY_CACHE = Path.home() / ".bravelgo-publish-policy.txt"
-LISTING_CACHE = Path.home() / ".bravelgo-publish-listing.json"
-CONFIG_F = Path.home() / ".bravelgo.json"
+from bravelgo.publish.paths import config_path, listing_cache_path, policy_cache_path
 
 
 def listing_ready(listing: dict | None) -> bool:
@@ -16,20 +14,22 @@ def listing_ready(listing: dict | None) -> bool:
     return bool((listing.get("short") or "").strip() or (listing.get("full") or "").strip())
 
 
-def load_listing_cache() -> dict | None:
-    if not LISTING_CACHE.is_file():
+def load_listing_cache(home: str | None = None) -> dict | None:
+    path = listing_cache_path(home)
+    if not path.is_file():
         return None
     try:
-        data = json.loads(LISTING_CACHE.read_text(encoding="utf-8"))
+        data = json.loads(path.read_text(encoding="utf-8"))
         return data if listing_ready(data) else None
     except (OSError, json.JSONDecodeError):
         return None
 
 
-def load_policy_cache() -> str | None:
-    if not POLICY_CACHE.is_file():
+def load_policy_cache(home: str | None = None) -> str | None:
+    path = policy_cache_path(home)
+    if not path.is_file():
         return None
-    text = POLICY_CACHE.read_text(encoding="utf-8").strip()
+    text = path.read_text(encoding="utf-8").strip()
     return text or None
 
 
@@ -39,12 +39,14 @@ def persist_texts(
     listing: dict | None = None,
     policy: str | None = None,
     log: Callable[[str], None] | None = None,
+    user_home: str | None = None,
 ) -> None:
+    home = user_home or os.environ.get("HOME")
     pub = cfg.setdefault("publish", {})
     if listing and listing_ready(listing):
         pub["last_listing"] = listing
         try:
-            LISTING_CACHE.write_text(
+            listing_cache_path(home).write_text(
                 json.dumps(listing, ensure_ascii=False, indent=2),
                 encoding="utf-8",
             )
@@ -53,20 +55,21 @@ def persist_texts(
     if policy:
         pub["last_policy_chars"] = len(policy)
         try:
-            POLICY_CACHE.write_text(policy, encoding="utf-8")
+            policy_cache_path(home).write_text(policy, encoding="utf-8")
         except OSError:
             pass
     cfg["publish"] = pub
+    cfg_path = config_path(home)
     try:
-        if CONFIG_F.is_file():
-            disk = json.loads(CONFIG_F.read_text(encoding="utf-8"))
+        if cfg_path.is_file():
+            disk = json.loads(cfg_path.read_text(encoding="utf-8"))
         else:
             disk = {}
         disk["publish"] = {**disk.get("publish", {}), **pub}
-        CONFIG_F.write_text(json.dumps(disk, ensure_ascii=False, indent=2), encoding="utf-8")
+        cfg_path.write_text(json.dumps(disk, ensure_ascii=False, indent=2), encoding="utf-8")
     except OSError as exc:
         if log:
-            log(f"WARN: could not save ~/.bravelgo.json: {exc}")
+            log(f"WARN: could not save {cfg_path}: {exc}")
     else:
         if log:
             parts = []
@@ -75,4 +78,4 @@ def persist_texts(
             if policy:
                 parts.append("policy")
             if parts:
-                log(f"Saved {' + '.join(parts)} → cache (Full publish can skip Gemini)")
+                log(f"Saved {' + '.join(parts)} → {cfg_path.parent}")

@@ -24,17 +24,24 @@ from bravelgo.publish.ui_actions import PublishUI
 from bravelgo.publish.wait_console import wait_for_console_ready
 
 
-def _load_cached_texts(pub: dict, package: str, app_name: str, log: Callable[[str], None]) -> tuple[dict | None, str | None]:
+def _load_cached_texts(
+    pub: dict,
+    package: str,
+    app_name: str,
+    log: Callable[[str], None],
+    *,
+    home: str | None = None,
+) -> tuple[dict | None, str | None]:
     listing: dict | None = None
     if listing_ready(pub.get("last_listing")):
         listing = listing_from_pub(pub, app_name)
         log("Using store listing from saved settings")
     if not listing:
-        listing = load_listing_cache()
+        listing = load_listing_cache(home)
         if listing:
             log("Loaded listing from ~/.bravelgo-publish-listing.json")
 
-    policy = policy_from_pub(pub) or None
+    policy = policy_from_pub(pub, home) or None
     if policy:
         log(f"Policy text: {len(policy)} chars")
 
@@ -55,19 +62,21 @@ def _generate_texts(
     email: str,
     api_key: str,
     log: Callable[[str], None],
+    *,
+    home: str | None = None,
 ) -> tuple[dict, str]:
     seed = unique_seed()
     texts_dir = pub.get("texts_dir", "")
     local_listing, local_policy = try_load_local_texts(package, app_name, texts_dir, log)
     use_local_only = pub.get("use_local_texts_only", False)
 
-    listing = local_listing or load_listing_cache()
-    policy = local_policy or load_policy_cache()
+    listing = local_listing or load_listing_cache(home)
+    policy = local_policy or load_policy_cache(home)
 
     if use_local_only:
         if not listing or not policy:
             raise ValueError("Local texts only — fill texts folder or uncheck the option")
-        persist_texts(cfg, listing=listing, policy=policy, log=log)
+        persist_texts(cfg, listing=listing, policy=policy, log=log, user_home=home)
         return listing, policy
 
     if not api_key and (listing is None or policy is None):
@@ -91,7 +100,7 @@ def _generate_texts(
                 f"Listing OK: short={len(listing.get('short', ''))} "
                 f"full={len(listing.get('full', ''))} chars"
             )
-            persist_texts(cfg, listing=listing, log=log)
+            persist_texts(cfg, listing=listing, log=log, user_home=home)
 
         if policy is None:
             log("Gemini: privacy policy…")
@@ -105,36 +114,36 @@ def _generate_texts(
                 model=pub.get("gemini_model", ""),
             )
             log(f"Policy OK: {len(policy)} chars")
-            persist_texts(cfg, policy=policy, log=log)
+            persist_texts(cfg, policy=policy, log=log, user_home=home)
     except GeminiPublishError as exc:
         local_listing, local_policy = try_load_local_texts(package, app_name, texts_dir, log)
         listing = listing or local_listing
         policy = policy or local_policy
         if listing and policy:
             log("Gemini failed — using texts from folder")
-            persist_texts(cfg, listing=listing, policy=policy, log=log)
+            persist_texts(cfg, listing=listing, policy=policy, log=log, user_home=home)
             return listing, policy
         if pub.get("use_stub_on_quota", True):
             log("Gemini 429 — saving basic English stub texts (edit later in Play Console)")
             listing = listing or stub_listing(app_name)
             policy = policy or stub_policy(app_name, email)
-            persist_texts(cfg, listing=listing, policy=policy, log=log)
+            persist_texts(cfg, listing=listing, policy=policy, log=log, user_home=home)
             return listing, policy
         if listing and not policy:
-            persist_texts(cfg, listing=listing, log=log)
+            persist_texts(cfg, listing=listing, log=log, user_home=home)
             log(
                 "Listing saved. Policy failed (429) — paste Privacy URL, check Skip Google Docs, "
                 "then Full publish (no Gemini)"
             )
             return listing, ""
         if listing:
-            persist_texts(cfg, listing=listing, log=log)
+            persist_texts(cfg, listing=listing, log=log, user_home=home)
         raise ValueError(str(exc)) from exc
 
     if not listing or not policy:
         raise ValueError("Missing listing or policy after Gemini")
 
-    persist_texts(cfg, listing=listing, policy=policy, log=log)
+    persist_texts(cfg, listing=listing, policy=policy, log=log, user_home=home)
     return listing, policy
 
 
@@ -157,7 +166,7 @@ def run_publish(
     api_key = pub.get("gemini_api_key", "").strip()
     use_vision = use_vision and bool(pub.get("use_vision", True))
     wait_console = wait_console and bool(pub.get("wait_for_console", True))
-    skip_docs = skip_docs or bool(pub.get("skip_docs_flow")) or bool(privacy_url_from_pub(pub))
+    skip_docs = skip_docs or bool(pub.get("skip_docs_flow"))
     country = (cfg.get("country") or pub.get("country") or "FR").strip()
 
     if not email or not package or not app_name:
@@ -175,13 +184,15 @@ def run_publish(
 
     if step == "generate":
         log("Generate: browser stays closed (Gemini API only)")
-        listing, policy = _generate_texts(pub, cfg, package, app_name, email, api_key, log)
+        listing, policy = _generate_texts(
+            pub, cfg, package, app_name, email, api_key, log, home=home
+        )
         result["listing"] = listing
         result["policy_text"] = policy
         return result
 
     validate_for_browser_step(pub, step)
-    listing, policy = _load_cached_texts(pub, package, app_name, log)
+    listing, policy = _load_cached_texts(pub, package, app_name, log, home=home)
     if not listing:
         raise ValueError("No listing — fill manual fields and Save manual texts")
     result["listing"] = listing
