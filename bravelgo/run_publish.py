@@ -50,7 +50,10 @@ def main() -> None:
         cfg["publish"] = pub
 
     def log(msg: str) -> None:
-        line = msg if msg.startswith("[") else f"[*] {msg}"
+        msg = (msg or "").strip()
+        if msg.startswith("[*]"):
+            msg = msg[3:].strip()
+        line = f"[*] {msg}"
         print(line, flush=True)
         try:
             with open(LOG_F, "a", encoding="utf-8") as f:

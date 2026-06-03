@@ -8,7 +8,8 @@ from bravelgo.publish.browser import close_browser, launch_context
 from bravelgo.publish.config import merge_publish_config
 from bravelgo.publish.console_flow import run_console_setup, run_create_application
 from bravelgo.publish.docs_flow import run_docs_flow
-from bravelgo.publish.gemini import generate_listing, generate_privacy, unique_seed
+from bravelgo.publish.gemini import GeminiPublishError, generate_listing, generate_privacy, unique_seed
+from bravelgo.publish.local_texts import try_load_local_texts
 from bravelgo.publish.profile_resolve import resolve_profile_dir
 from bravelgo.publish.ui_actions import PublishUI
 from bravelgo.publish.wait_console import wait_for_console_ready
@@ -51,25 +52,65 @@ def run_publish(
     seed = unique_seed()
 
     if step in ("all", "generate"):
-        if not api_key:
-            raise ValueError("Gemini API key required for generate step")
-        log("Gemini: store listing…")
-        listing = generate_listing(
-            api_key,
-            pub.get("listing_prompt", ""),
-            app_name,
-            email,
-            seed=seed,
-        )
-        log(f"Listing: short={len(listing.get('short', ''))} full={len(listing.get('full', ''))} chars")
-        log("Gemini: privacy policy…")
-        policy = generate_privacy(
-            api_key,
-            pub.get("privacy_prompt", ""),
-            app_name,
-            email,
-            seed=seed,
-        )
+        texts_dir = pub.get("texts_dir", "")
+        local_listing, local_policy = try_load_local_texts(package, app_name, texts_dir, log)
+        use_local_only = pub.get("use_local_texts_only", False)
+
+        listing = local_listing
+        policy = local_policy
+
+        if not use_local_only and (listing is None or policy is None):
+            if not api_key:
+                if listing is None or policy is None:
+                    raise ValueError(
+                        "Gemini API key missing — add key or fill texts folder "
+                        "(title/short/full/policy.txt)"
+                    )
+            try:
+                if listing is None:
+                    log("Gemini: store listing…")
+                    listing = generate_listing(
+                        api_key,
+                        pub.get("listing_prompt", ""),
+                        app_name,
+                        email,
+                        seed=seed,
+                        log=log,
+                        model=pub.get("gemini_model", ""),
+                    )
+                    log(
+                        f"Listing OK: short={len(listing.get('short', ''))} "
+                        f"full={len(listing.get('full', ''))} chars"
+                    )
+                if policy is None:
+                    log("Gemini: privacy policy…")
+                    policy = generate_privacy(
+                        api_key,
+                        pub.get("privacy_prompt", ""),
+                        app_name,
+                        email,
+                        seed=seed,
+                        log=log,
+                        model=pub.get("gemini_model", ""),
+                    )
+                    log(f"Policy OK: {len(policy)} chars")
+            except GeminiPublishError:
+                local_listing, local_policy = try_load_local_texts(package, app_name, texts_dir, log)
+                if local_listing:
+                    listing = listing or local_listing
+                if local_policy:
+                    policy = policy or local_policy
+                if listing and policy:
+                    log("Gemini failed — using texts from folder")
+                else:
+                    raise
+
+        if not listing or not policy:
+            raise ValueError(
+                "Missing listing or policy — run Gemini or add files to "
+                f"~/bravelgo-publish-texts/{package.replace('.', '_')}/"
+            )
+
         result["listing"] = listing
         result["policy_text"] = policy
         pub["last_listing"] = listing

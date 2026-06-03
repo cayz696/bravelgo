@@ -719,6 +719,20 @@ class App(ModernApp):
             ttk.Checkbutton(opts, text=txt, variable=var).pack(anchor="w")
 
         gf = self._card(scroll, "Gemini & graphics")
+        kr2 = tk.Frame(gf, bg=C.SURFACE)
+        kr2.pack(fill="x", pady=(0, 8))
+        kr2.grid_columnconfigure(1, weight=1)
+        tk.Label(kr2, text="Model", fg=C.TEXT2, bg=C.SURFACE, anchor="w").grid(row=0, column=0, sticky="w", padx=(0, 10))
+        from bravelgo.publish.gemini import PUBLISH_MODEL_CHOICES
+
+        self.combo_pub_gemini_model = ttk.Combobox(
+            kr2,
+            values=list(PUBLISH_MODEL_CHOICES),
+            state="readonly",
+            width=28,
+        )
+        self.combo_pub_gemini_model.set(pub.get("gemini_model", "gemini-2.5-flash"))
+        self.combo_pub_gemini_model.grid(row=0, column=1, sticky="ew")
         _pub_field(gf, "API key", "ent_pub_gemini")
         self.ent_pub_gemini.configure(show="*")
         self.ent_pub_gemini.delete(0, tk.END)
@@ -726,6 +740,19 @@ class App(ModernApp):
         _pub_field(gf, "Graphics dir", "ent_pub_graphics")
         self.ent_pub_graphics.delete(0, tk.END)
         self.ent_pub_graphics.insert(0, pub.get("graphics_dir", ""))
+        _pub_field(gf, "Texts folder", "ent_pub_texts_dir")
+        self.ent_pub_texts_dir.delete(0, tk.END)
+        self.ent_pub_texts_dir.insert(0, pub.get("texts_dir", ""))
+        self.v_pub_local_only = tk.BooleanVar(value=bool(pub.get("use_local_texts_only")))
+        ttk.Checkbutton(
+            gf,
+            text="Use texts folder only (skip Gemini — no API quota)",
+            variable=self.v_pub_local_only,
+        ).pack(anchor="w", pady=(6, 0))
+        tf = tk.Frame(gf, bg=C.SURFACE)
+        tf.pack(fill="x", pady=(6, 0))
+        self._btn(tf, "Create/open texts folder", self._publish_texts_folder, variant="ghost", side="left", padx=(0, 6))
+        self._btn(tf, "Load texts from folder", self._publish_load_texts, variant="ghost", side="left")
 
         lp = self._card(scroll, "Listing prompt")
         self.txt_pub_listing_prompt = self._text(lp, height=5, mono=True, readonly=False)
@@ -768,7 +795,10 @@ class App(ModernApp):
         pub["package_name"] = self.ent_pub_package.get().strip()
         pub["app_name"] = self.ent_pub_app.get().strip()
         pub["gemini_api_key"] = self.ent_pub_gemini.get().strip()
+        pub["gemini_model"] = self.combo_pub_gemini_model.get().strip()
         pub["graphics_dir"] = self.ent_pub_graphics.get().strip()
+        pub["texts_dir"] = self.ent_pub_texts_dir.get().strip()
+        pub["use_local_texts_only"] = self.v_pub_local_only.get()
         pub["listing_prompt"] = self.txt_pub_listing_prompt.get("1.0", tk.END).strip()
         pub["privacy_prompt"] = self.txt_pub_privacy_prompt.get("1.0", tk.END).strip()
         pub["app_already_exists"] = self.v_pub_app_exists.get()
@@ -817,6 +847,46 @@ class App(ModernApp):
             if short or full
             else "Listing cached: (none — run Generate texts)"
         )
+
+    def _publish_texts_folder(self):
+        from bravelgo.publish.config import save_publish_section
+        from bravelgo.publish.local_texts import ensure_texts_dir
+
+        pub = self._publish_collect()
+        save_publish_section(self.cfg, pub)
+        cfg_save(self.cfg)
+        pkg = pub.get("package_name", "app")
+        base = ensure_texts_dir(pkg, pub.get("texts_dir", ""), self.log)
+        self.log(f"Edit files in: {base}")
+        self.log("title.txt · short.txt · full.txt · policy.txt — then «Load texts from folder»")
+
+    def _publish_load_texts(self):
+        from bravelgo.publish.local_texts import try_load_local_texts
+        from bravelgo.publish.config import save_publish_section
+
+        pub = self._publish_collect()
+        listing, policy = try_load_local_texts(
+            pub.get("package_name", ""),
+            pub.get("app_name", ""),
+            pub.get("texts_dir", ""),
+            self.log,
+        )
+        if not listing and not policy:
+            self.show_error(
+                "Texts",
+                "No files found — click «Create/open texts folder» and fill txt files",
+            )
+            return
+        if listing:
+            pub["last_listing"] = listing
+        if policy:
+            from pathlib import Path
+            Path(f"{USER_HOME}/.bravelgo-publish-policy.txt").write_text(policy, encoding="utf-8")
+        save_publish_section(self.cfg, pub)
+        cfg_save(self.cfg)
+        self._publish_apply_results(pub)
+        self.log("Texts loaded from folder (Gemini not used)")
+        self.set_status("Texts loaded", "ok")
 
     def _publish_thread_generate(self):
         threading.Thread(target=lambda: self._publish_run(step="generate"), daemon=True).start()
