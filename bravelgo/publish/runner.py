@@ -214,6 +214,7 @@ def run_publish(
     log("Opening Firefox (Selenium + your profile)…")
     driver, _, page = launch_context(prof, log, country=country)
     ui = PublishUI(page, log, gemini_api_key=api_key, use_vision=use_vision)
+    completed = False
 
     try:
         start_url = DOCS_START_URL if step == "docs" else CONSOLE_URL
@@ -264,7 +265,11 @@ def run_publish(
                 log(f"Console automation error: {exc}")
                 log(traceback.format_exc()[-800:])
                 raise
+        completed = True
     finally:
-        close_browser(driver, None, log)
+        if completed:
+            close_browser(driver, None, log)
+        else:
+            log("Browser left open after error — finish/check manually")
 
     return result

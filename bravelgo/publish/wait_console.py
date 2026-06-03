@@ -33,7 +33,10 @@ def wait_for_console_ready(
     """
     Blocks until:
     - flag file exists (BravelGo «Continue» button), or
-    - current tab URL contains play.google.com/console
+    - timeout expires.
+
+    Important: do NOT auto-continue on play.google.com/console URL.
+    The user may still need to choose/open the correct app page manually.
     """
     flag = flag_path or CONTINUE_FLAG
     clear_continue_flag()
@@ -46,9 +49,9 @@ def wait_for_console_ready(
 
     log(
         "⏸ Waiting for you on Play Console…\n"
-        "   Open developer home / your app, then in BravelGo click:\n"
+        "   Open the correct app / dashboard page, then in BravelGo click:\n"
         "   «Continue — I'm on Console»\n"
-        f"   (auto-continue when URL is play.google.com/console, max {timeout_minutes} min)"
+        f"   (manual Continue only, max {timeout_minutes} min)"
     )
 
     deadline = time.time() + timeout_minutes * 60
@@ -66,9 +69,7 @@ def wait_for_console_ready(
         try:
             url = page.url or ""
             if url != last_url and "play.google.com/console" in url:
-                log(f"Console detected: {url[:90]}")
-                time.sleep(2)
-                return
+                log(f"Console page seen: {url[:90]} — waiting for Continue")
             last_url = url
         except Exception:
             pass
