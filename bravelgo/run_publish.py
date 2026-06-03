@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import fcntl
 import json
 import os
 import sys
@@ -16,6 +17,7 @@ from bravelgo.publish.runner import run_publish  # noqa: E402
 
 CONFIG_F = Path.home() / ".bravelgo.json"
 LOG_F = Path.home() / ".bravelgo-publish.log"
+LOCK_F = Path.home() / ".bravelgo-publish.lock"
 
 
 def load_cfg() -> dict:
@@ -28,6 +30,19 @@ def load_cfg() -> dict:
 def save_cfg(cfg: dict) -> None:
     with open(CONFIG_F, "w", encoding="utf-8") as f:
         json.dump(cfg, f, ensure_ascii=False, indent=2)
+
+
+def _acquire_lock() -> object | None:
+    LOCK_F.parent.mkdir(parents=True, exist_ok=True)
+    fh = open(LOCK_F, "w", encoding="utf-8")
+    try:
+        fcntl.flock(fh.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except BlockingIOError:
+        fh.close()
+        return None
+    fh.write(f"pid={os.getpid()}\n")
+    fh.flush()
+    return fh
 
 
 def main() -> None:
@@ -43,16 +58,26 @@ def main() -> None:
     parser.add_argument("--no-vision", action="store_true")
     args = parser.parse_args()
 
+    lock = _acquire_lock()
+    if lock is None:
+        print("[*] FATAL: Another publish is already running — wait or Tail log", flush=True)
+        sys.exit(2)
+
     cfg = load_cfg()
     pub = merge_publish_config(cfg)
     if args.skip_create:
         pub["app_already_exists"] = True
         cfg["publish"] = pub
 
+    seen: set[str] = set()
+
     def log(msg: str) -> None:
         msg = (msg or "").strip()
         if msg.startswith("[*]"):
             msg = msg[3:].strip()
+        if msg in seen:
+            return
+        seen.add(msg)
         line = f"[*] {msg}"
         print(line, flush=True)
         try:
@@ -63,9 +88,9 @@ def main() -> None:
 
     STEP_NOTE = {
         "generate": "NO Firefox — only Gemini API → saves listing + policy to cache",
-        "docs": "Opens Firefox → Google Docs → privacy URL",
-        "console": "Opens Firefox → Play Console forms (use Continue if waiting)",
-        "all": "Opens Firefox → wait Console → Docs → Console setup",
+        "docs": "Opens Firefox → Google Docs → privacy URL (needs cached texts)",
+        "console": "Opens Firefox → Play Console (needs cached texts)",
+        "all": "Opens Firefox → wait Console → Docs → Console (NO Gemini)",
     }
     LOG_F.write_text(f"=== Publish {args.step} ===\n", encoding="utf-8")
     log(STEP_NOTE.get(args.step, args.step))
@@ -89,6 +114,13 @@ def main() -> None:
     except Exception as exc:
         log(f"FATAL: {exc}")
         sys.exit(1)
+    finally:
+        try:
+            fcntl.flock(lock.fileno(), fcntl.LOCK_UN)
+            lock.close()
+            LOCK_F.unlink(missing_ok=True)
+        except OSError:
+            pass
 
 
 if __name__ == "__main__":

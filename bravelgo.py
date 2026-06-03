@@ -662,7 +662,7 @@ class App(ModernApp):
         self._btn(r2, "Tail log", self._publish_tail_log, variant="ghost", side="left")
         self._hint(
             btn_row.master,
-            "1) Save  2) Generate (NO Firefox)  3) Full publish (Firefox opens)  4) Continue on Console",
+            "1) Save  2) Generate (Gemini, free tier)  3) Full publish (Firefox only, no Gemini)  4) Continue",
             bg=C.ELEVATED,
         )
 
@@ -731,7 +731,10 @@ class App(ModernApp):
             state="readonly",
             width=28,
         )
-        self.combo_pub_gemini_model.set(pub.get("gemini_model", "gemini-2.5-flash"))
+        model = pub.get("gemini_model", "gemini-2.5-flash")
+        if model not in PUBLISH_MODEL_CHOICES:
+            model = "gemini-2.5-flash"
+        self.combo_pub_gemini_model.set(model)
         self.combo_pub_gemini_model.grid(row=0, column=1, sticky="ew")
         _pub_field(gf, "API key", "ent_pub_gemini")
         self.ent_pub_gemini.configure(show="*")
