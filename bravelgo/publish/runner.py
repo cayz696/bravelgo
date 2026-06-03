@@ -25,6 +25,21 @@ from bravelgo.publish.ui_actions import PublishUI
 from bravelgo.publish.wait_console import wait_for_console_ready
 
 
+def _ensure_app_page_after_continue(page, log: Callable[[str], None]) -> None:
+    url = ""
+    try:
+        url = page.url or ""
+    except Exception:
+        pass
+    low = url.lower()
+    if "play.google.com/console" in low and low.rstrip("/").endswith("/developers"):
+        log(f"Stopped on developer home: {url[:100]}")
+        raise RuntimeError(
+            "Open the exact app page/dashboard in Play Console, then click Continue again. "
+            "Do not click Continue on the generic developers page."
+        )
+
+
 def _load_cached_texts(
     pub: dict,
     package: str,
@@ -226,6 +241,7 @@ def run_publish(
 
         if wait_console and step in ("all", "console"):
             wait_for_console_ready(page, log, open_console_hint=False)
+            _ensure_app_page_after_continue(page, log)
 
         run_docs = step in ("all", "docs") and not skip_docs
         if run_docs:

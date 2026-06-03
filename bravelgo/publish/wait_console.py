@@ -49,7 +49,7 @@ def wait_for_console_ready(
 
     log(
         "⏸ Waiting for you on Play Console…\n"
-        "   Open the correct app / dashboard page, then in BravelGo click:\n"
+        "   Open the exact app page/dashboard (NOT generic /developers), then click:\n"
         "   «Continue — I'm on Console»\n"
         f"   (manual Continue only, max {timeout_minutes} min)"
     )
