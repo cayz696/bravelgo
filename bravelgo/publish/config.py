@@ -26,6 +26,8 @@ def default_publish_config() -> dict[str, Any]:
         "texts_dir": "",
         "last_privacy_url": "",
         "last_listing": {},
+        "manual_policy_text": "",
+        "skip_docs_flow": False,
         "browser": "firefox",
         "use_vision": True,
         "wait_for_console": True,

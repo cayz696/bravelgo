@@ -42,6 +42,11 @@ def main() -> None:
     parser.add_argument("--skip-create", action="store_true")
     parser.add_argument("--no-wait-console", action="store_true")
     parser.add_argument("--no-vision", action="store_true")
+    parser.add_argument(
+        "--skip-docs",
+        action="store_true",
+        help="Use privacy URL from settings — do not open Google Docs",
+    )
     args = parser.parse_args()
 
     lock, err = try_acquire_lock()
@@ -98,6 +103,7 @@ def main() -> None:
             skip_create=args.skip_create or pub.get("app_already_exists", False),
             wait_console=not args.no_wait_console,
             use_vision=not args.no_vision,
+            skip_docs=args.skip_docs or bool(pub.get("skip_docs_flow")),
         )
         save_cfg(cfg)
         if result.get("privacy_url"):

@@ -1,21 +1,23 @@
-"""Orchestrate publish pipeline: generate → wait → docs → console."""
+"""Orchestrate publish pipeline: manual texts, optional Gemini, browser steps."""
 from __future__ import annotations
 
 from pathlib import Path
 from typing import Callable
 
 from bravelgo.publish.browser import close_browser, launch_context
-from bravelgo.publish.cache_io import (
-    listing_ready,
-    load_listing_cache,
-    load_policy_cache,
-    persist_texts,
-)
 from bravelgo.publish.config import CONSOLE_URL, DOCS_START_URL, merge_publish_config
 from bravelgo.publish.console_flow import run_console_setup, run_create_application
 from bravelgo.publish.docs_flow import run_docs_flow
 from bravelgo.publish.gemini import GeminiPublishError, generate_listing, generate_privacy, unique_seed
 from bravelgo.publish.local_texts import try_load_local_texts
+from bravelgo.publish.manual_io import (
+    listing_from_pub,
+    policy_from_pub,
+    privacy_url_from_pub,
+    save_manual_to_cache,
+    validate_for_browser_step,
+)
+from bravelgo.publish.cache_io import load_listing_cache, load_policy_cache, listing_ready, persist_texts
 from bravelgo.publish.stub_texts import stub_listing, stub_policy
 from bravelgo.publish.profile_resolve import resolve_profile_dir
 from bravelgo.publish.ui_actions import PublishUI
@@ -25,15 +27,16 @@ from bravelgo.publish.wait_console import wait_for_console_ready
 def _load_cached_texts(pub: dict, package: str, app_name: str, log: Callable[[str], None]) -> tuple[dict | None, str | None]:
     listing: dict | None = None
     if listing_ready(pub.get("last_listing")):
-        listing = dict(pub.get("last_listing") or {})
+        listing = listing_from_pub(pub, app_name)
+        log("Using store listing from saved settings")
     if not listing:
         listing = load_listing_cache()
         if listing:
             log("Loaded listing from ~/.bravelgo-publish-listing.json")
 
-    policy = load_policy_cache()
+    policy = policy_from_pub(pub) or None
     if policy:
-        log(f"Loaded policy from cache ({len(policy)} chars)")
+        log(f"Policy text: {len(policy)} chars")
 
     texts_dir = pub.get("texts_dir", "")
     local_listing, local_policy = try_load_local_texts(package, app_name, texts_dir, log)
@@ -69,8 +72,7 @@ def _generate_texts(
 
     if not api_key and (listing is None or policy is None):
         raise ValueError(
-            "Gemini API key missing — add key or texts in "
-            f"~/bravelgo-publish-texts/{package.replace('.', '_')}/"
+            "Gemini API key missing — use manual fields + Save, or texts folder"
         )
 
     try:
@@ -123,30 +125,10 @@ def _generate_texts(
         raise ValueError(str(exc)) from exc
 
     if not listing or not policy:
-        raise ValueError(
-            "Missing listing or policy — add files to "
-            f"~/bravelgo-publish-texts/{package.replace('.', '_')}/"
-        )
+        raise ValueError("Missing listing or policy after Gemini")
 
     persist_texts(cfg, listing=listing, policy=policy, log=log)
     return listing, policy
-
-
-def _require_cached_texts(
-    pub: dict,
-    package: str,
-    app_name: str,
-    log: Callable[[str], None],
-) -> tuple[dict, str]:
-    listing, policy = _load_cached_texts(pub, package, app_name, log)
-    if listing and policy:
-        return listing, policy
-    raise ValueError(
-        "No saved texts for Full publish. "
-        "1) Click «Generate texts» and wait for «Done» in Tail log (not 429). "
-        "2) Or «Load texts from folder». "
-        "Full publish does NOT call Gemini (saves free quota)."
-    )
 
 
 def run_publish(
@@ -159,11 +141,8 @@ def run_publish(
     skip_create: bool = False,
     wait_console: bool = True,
     use_vision: bool = True,
+    skip_docs: bool = False,
 ) -> dict:
-    """
-    step: all | generate | docs | console
-    profile_dir: auto-resolved from system if None/empty
-    """
     pub = merge_publish_config(cfg)
     email = pub.get("account_email", "").strip()
     package = pub.get("package_name", "").strip()
@@ -171,6 +150,7 @@ def run_publish(
     api_key = pub.get("gemini_api_key", "").strip()
     use_vision = use_vision and bool(pub.get("use_vision", True))
     wait_console = wait_console and bool(pub.get("wait_for_console", True))
+    skip_docs = skip_docs or bool(pub.get("skip_docs_flow"))
     country = (cfg.get("country") or pub.get("country") or "FR").strip()
 
     if not email or not package or not app_name:
@@ -181,7 +161,10 @@ def run_publish(
     if not prof:
         raise ValueError("Firefox profile not found — run Full uniquify or Launch Firefox once")
 
-    result: dict = {"privacy_url": pub.get("last_privacy_url", ""), "listing": pub.get("last_listing", {})}
+    result: dict = {
+        "privacy_url": privacy_url_from_pub(pub),
+        "listing": listing_from_pub(pub, app_name),
+    }
 
     if step == "generate":
         log("Generate: browser stays closed (Gemini API only)")
@@ -190,12 +173,16 @@ def run_publish(
         result["policy_text"] = policy
         return result
 
-    listing, policy = _require_cached_texts(pub, package, app_name, log)
-    log("Using cached texts — Gemini skipped")
+    validate_for_browser_step(pub, step)
+    listing, policy = _load_cached_texts(pub, package, app_name, log)
+    if not listing:
+        raise ValueError("No listing — fill manual fields and Save")
     result["listing"] = listing
-    result["policy_text"] = policy
+    result["policy_text"] = policy or ""
+    log("Manual / saved texts — Gemini skipped")
 
     policy_text = policy or ""
+    privacy_url = privacy_url_from_pub(pub)
 
     need_browser = step in ("all", "docs", "console")
     if not need_browser:
@@ -216,17 +203,26 @@ def run_publish(
         if wait_console and step in ("all", "console"):
             wait_for_console_ready(page, log, open_console_hint=False)
 
-        if step in ("all", "docs"):
+        run_docs = step in ("all", "docs") and not skip_docs
+        if run_docs:
+            if not policy_text:
+                raise ValueError("No policy text for Docs — paste in form or enable Skip Google Docs")
             url = run_docs_flow(page, policy_text, app_name, ui)
             if url:
                 result["privacy_url"] = url
                 pub["last_privacy_url"] = url
                 cfg["publish"] = pub
+        elif step in ("all", "docs"):
+            if privacy_url:
+                result["privacy_url"] = privacy_url
+                log(f"Skipping Google Docs — using your URL: {privacy_url[:70]}…")
+            else:
+                raise ValueError("Privacy URL required when Skip Google Docs is enabled")
 
         if step in ("all", "console"):
-            privacy_url = result.get("privacy_url") or pub.get("last_privacy_url", "")
+            privacy_url = result.get("privacy_url") or privacy_url_from_pub(pub)
             if not privacy_url:
-                raise ValueError("No privacy URL — run Docs step first")
+                raise ValueError("No privacy URL — paste link in Publish tab")
             if not skip_create and not pub.get("app_already_exists"):
                 run_create_application(page, app_name, package, ui)
             run_console_setup(

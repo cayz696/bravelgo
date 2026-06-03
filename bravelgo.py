@@ -663,7 +663,7 @@ class App(ModernApp):
         self._btn(r2, "Tail log", self._publish_tail_log, variant="ghost", side="left")
         self._hint(
             btn_row.master,
-            "1) Save  2) Generate (Gemini, free tier)  3) Full publish (Firefox only, no Gemini)  4) Continue",
+            "Manual: fill listing + privacy URL → Save manual texts → Full publish (Console). Gemini optional.",
             bg=C.ELEVATED,
         )
 
@@ -671,7 +671,7 @@ class App(ModernApp):
 
         self._hint(
             self._card(scroll, "Play publish"),
-            "Firefox profile + proxy (user.js) · Selenium (like Warmup) · Gemini Vision · detached log.",
+            "Fill fields below · Save manual texts · Full publish opens Firefox for Play Console.",
         )
 
         pf = self._card(scroll, "Firefox profile (auto)")
@@ -719,7 +719,94 @@ class App(ModernApp):
         ):
             ttk.Checkbutton(opts, text=txt, variable=var).pack(anchor="w")
 
-        gf = self._card(scroll, "Gemini & graphics")
+        listing = pub.get("last_listing") if isinstance(pub.get("last_listing"), dict) else {}
+        from bravelgo.publish.manual_io import policy_from_pub
+
+        manual = self._card(scroll, "Store listing — your texts")
+        self._hint(
+            manual,
+            "Paste copy for Play Console. Short ≤80 chars, full ≤4000. Then «Save manual texts».",
+        )
+
+        def _pub_row(parent, label: str, hint: str = ""):
+            row = tk.Frame(parent, bg=C.SURFACE)
+            row.pack(fill="x", pady=(0, 4))
+            tk.Label(row, text=label, fg=C.TEXT2, bg=C.SURFACE, anchor="w").pack(anchor="w")
+            if hint:
+                tk.Label(row, text=hint, fg=C.TEXT3, bg=C.SURFACE, anchor="w", font=("", 9)).pack(anchor="w")
+            return row
+
+        r_title = _pub_row(manual, "Title (max 30)", "Shown as app name on store")
+        self.ent_pub_title = tk.Entry(
+            r_title, bg=C.INPUT_BG, fg=C.INPUT_FG, insertbackground=C.ACCENT,
+            relief="flat", highlightthickness=1,
+            highlightbackground=C.BORDER, highlightcolor=C.BORDER_FOCUS,
+        )
+        self.ent_pub_title.pack(fill="x", pady=(4, 8), ipady=6)
+        self.ent_pub_title.insert(0, listing.get("title") or pub.get("app_name", ""))
+        self.lbl_pub_title_len = tk.Label(r_title, text="", fg=C.TEXT3, bg=C.SURFACE, anchor="e")
+        self.lbl_pub_title_len.pack(fill="x")
+
+        r_short = _pub_row(manual, "Short description (max 80)")
+        self.txt_pub_short = self._text(r_short, height=3, mono=False, readonly=False)
+        self.txt_pub_short.insert(tk.END, listing.get("short", ""))
+        self.lbl_pub_short_len = tk.Label(r_short, text="", fg=C.TEXT3, bg=C.SURFACE, anchor="e")
+        self.lbl_pub_short_len.pack(fill="x", pady=(0, 6))
+
+        r_full = _pub_row(manual, "Full description (max 4000)")
+        self.txt_pub_full = self._text(r_full, height=12, mono=False, readonly=False)
+        self.txt_pub_full.insert(tk.END, listing.get("full", ""))
+        self.lbl_pub_full_len = tk.Label(r_full, text="", fg=C.TEXT3, bg=C.SURFACE, anchor="e")
+        self.lbl_pub_full_len.pack(fill="x", pady=(0, 6))
+
+        mb = tk.Frame(manual, bg=C.SURFACE)
+        mb.pack(fill="x", pady=(4, 0))
+        self._btn(mb, "Save manual texts", self._publish_save_manual, variant="primary", side="left", padx=(0, 8))
+        self._btn(mb, "Save all settings", self._publish_save, variant="ghost", side="left")
+
+        priv = self._card(scroll, "Privacy policy")
+        self._hint(
+            priv,
+            "If you already have a public policy link, paste URL and enable «Skip Google Docs».",
+        )
+        tk.Label(priv, text="Privacy policy URL (required for Console)", fg=C.TEXT2, bg=C.SURFACE, anchor="w").pack(
+            anchor="w"
+        )
+        self.ent_pub_privacy_url = tk.Entry(
+            priv, bg=C.INPUT_BG, fg=C.INPUT_FG, insertbackground=C.ACCENT,
+            relief="flat", highlightthickness=1,
+            highlightbackground=C.BORDER, highlightcolor=C.BORDER_FOCUS,
+            font=FONT_MONO,
+        )
+        self.ent_pub_privacy_url.pack(fill="x", pady=(4, 8), ipady=8)
+        self.ent_pub_privacy_url.insert(0, pub.get("last_privacy_url", ""))
+
+        self.v_pub_skip_docs = tk.BooleanVar(value=bool(pub.get("skip_docs_flow", True)))
+        ttk.Checkbutton(
+            priv,
+            text="Skip Google Docs — I already have the privacy URL (recommended for manual)",
+            variable=self.v_pub_skip_docs,
+        ).pack(anchor="w", pady=(0, 8))
+
+        tk.Label(
+            priv,
+            text="Policy text (only if you use «Docs only» to create link automatically)",
+            fg=C.TEXT2,
+            bg=C.SURFACE,
+            anchor="w",
+        ).pack(anchor="w")
+        self.txt_pub_policy = self._text(priv, height=8, mono=False, readonly=False)
+        self.txt_pub_policy.insert(tk.END, policy_from_pub(pub))
+        self.lbl_pub_policy_len = tk.Label(priv, text="", fg=C.TEXT3, bg=C.SURFACE, anchor="e")
+        self.lbl_pub_policy_len.pack(fill="x")
+
+        self.ent_pub_title.bind("<KeyRelease>", lambda e: self._publish_update_char_labels())
+        self.txt_pub_short.bind("<KeyRelease>", lambda e: self._publish_update_char_labels())
+        self.txt_pub_full.bind("<KeyRelease>", lambda e: self._publish_update_char_labels())
+        self.txt_pub_policy.bind("<KeyRelease>", lambda e: self._publish_update_char_labels())
+        self._publish_update_char_labels()
+
+        gf = self._card(scroll, "Optional: Gemini AI")
         kr2 = tk.Frame(gf, bg=C.SURFACE)
         kr2.pack(fill="x", pady=(0, 8))
         kr2.grid_columnconfigure(1, weight=1)
@@ -759,24 +846,15 @@ class App(ModernApp):
         self._btn(tf, "Load texts from folder", self._publish_load_texts, variant="ghost", side="left", padx=(0, 6))
         self._btn(tf, "Stub texts (no Gemini)", self._publish_stub_texts, variant="ghost", side="left")
 
-        lp = self._card(scroll, "Listing prompt")
-        self.txt_pub_listing_prompt = self._text(lp, height=5, mono=True, readonly=False)
+        lp = self._card(scroll, "Gemini prompts (optional)")
+        self._hint(lp, "Used only when you click «Generate texts».")
+        self.txt_pub_listing_prompt = self._text(lp, height=4, mono=True, readonly=False)
         self.txt_pub_listing_prompt.insert(tk.END, pub.get("listing_prompt", ""))
-
-        pp = self._card(scroll, "Privacy prompt")
-        self.txt_pub_privacy_prompt = self._text(pp, height=4, mono=True, readonly=False)
+        tk.Label(lp, text="Privacy prompt", fg=C.TEXT2, bg=C.SURFACE, anchor="w").pack(anchor="w", pady=(8, 0))
+        self.txt_pub_privacy_prompt = self._text(lp, height=3, mono=True, readonly=False)
         self.txt_pub_privacy_prompt.insert(tk.END, pub.get("privacy_prompt", ""))
 
-        out = self._card(scroll, "Last run")
-        tk.Label(out, text="Privacy URL", fg=C.TEXT2, bg=C.SURFACE).pack(anchor="w")
-        self.ent_pub_privacy_url = tk.Entry(
-            out, bg=C.INPUT_BG, fg=C.INPUT_FG, insertbackground=C.ACCENT,
-            relief="flat", highlightthickness=1,
-            highlightbackground=C.BORDER, highlightcolor=C.BORDER_FOCUS,
-            font=FONT_MONO,
-        )
-        self.ent_pub_privacy_url.pack(fill="x", pady=(4, 6), ipady=6)
-        self.ent_pub_privacy_url.insert(0, pub.get("last_privacy_url", ""))
+        out = self._card(scroll, "Status")
         self.lbl_pub_listing = tk.Label(
             out, text="", fg=C.TEXT2, bg=C.SURFACE, justify="left", anchor="w", wraplength=700,
         )
@@ -787,7 +865,8 @@ class App(ModernApp):
             w = max(320, self.root.winfo_width() - 80)
             self._hint_wrap = w
             self.lbl_pub_profile.configure(wraplength=w)
-            self.lbl_pub_listing.configure(wraplength=w)
+            if hasattr(self, "lbl_pub_listing"):
+                self.lbl_pub_listing.configure(wraplength=w)
 
         self.root.bind("<Configure>", _update_wrap, add="+")
         _update_wrap()
@@ -810,8 +889,42 @@ class App(ModernApp):
         pub["use_vision"] = self.v_pub_vision.get()
         pub["wait_for_console"] = self.v_pub_wait.get()
         pub["detached"] = self.v_pub_detached.get()
+        pub["skip_docs_flow"] = self.v_pub_skip_docs.get()
         pub["last_privacy_url"] = self.ent_pub_privacy_url.get().strip()
+        pub["manual_policy_text"] = self.txt_pub_policy.get("1.0", tk.END).strip()
+        title = self.ent_pub_title.get().strip() or pub["app_name"]
+        pub["last_listing"] = {
+            "title": title[:30],
+            "short": self.txt_pub_short.get("1.0", tk.END).strip()[:80],
+            "full": self.txt_pub_full.get("1.0", tk.END).strip()[:4000],
+            "raw": "",
+        }
         return pub
+
+    def _publish_update_char_labels(self):
+        if not hasattr(self, "ent_pub_title"):
+            return
+        t = len(self.ent_pub_title.get().strip())
+        s = len(self.txt_pub_short.get("1.0", tk.END).strip())
+        f = len(self.txt_pub_full.get("1.0", tk.END).strip())
+        p = len(self.txt_pub_policy.get("1.0", tk.END).strip())
+        self.lbl_pub_title_len.configure(text=f"{t}/30 characters")
+        self.lbl_pub_short_len.configure(text=f"{s}/80 characters")
+        self.lbl_pub_full_len.configure(text=f"{f}/4000 characters")
+        self.lbl_pub_policy_len.configure(text=f"{p} characters (Docs only)")
+
+    def _publish_save_manual(self):
+        from bravelgo.publish.config import save_publish_section
+        from bravelgo.publish.manual_io import save_manual_to_cache
+
+        pub = self._publish_collect()
+        save_manual_to_cache(self.cfg, pub, log=self.log)
+        save_publish_section(self.cfg, pub)
+        cfg_save(self.cfg)
+        self._publish_update_char_labels()
+        self._publish_refresh_listing_label(pub)
+        self.log("Manual texts saved — ready for Full publish / Console only")
+        self.set_status("Manual texts saved", "ok")
 
     def _publish_show_profile(self):
         from bravelgo.publish.profile_resolve import resolve_profile_dir
@@ -835,10 +948,13 @@ class App(ModernApp):
 
     def _publish_save(self):
         from bravelgo.publish.config import save_publish_section
+        from bravelgo.publish.manual_io import save_manual_to_cache
 
         pub = self._publish_collect()
+        save_manual_to_cache(self.cfg, pub, log=None)
         save_publish_section(self.cfg, pub)
         cfg_save(self.cfg)
+        self._publish_update_char_labels()
         self._publish_refresh_listing_label(pub)
         self.log("Publish settings saved")
         self.set_status("Publish settings saved", "ok")
@@ -847,11 +963,19 @@ class App(ModernApp):
         listing = pub.get("last_listing") or {}
         short = listing.get("short", "")
         full = listing.get("full", "")
-        self.lbl_pub_listing.configure(
-            text=f"Listing cached: short {len(short)}/80 · full {len(full)}/4000"
-            if short or full
-            else "Listing cached: (none — run Generate texts)"
-        )
+        url = (pub.get("last_privacy_url") or "").strip()
+        skip = bool(pub.get("skip_docs_flow"))
+        parts = []
+        if short or full:
+            parts.append(f"Listing OK · short {len(short)}/80 · full {len(full)}/4000")
+        else:
+            parts.append("Listing: fill Title / Short / Full above")
+        if url:
+            parts.append(f"Privacy URL set ({len(url)} chars)")
+        elif skip:
+            parts.append("Privacy URL: required before Full publish")
+        if hasattr(self, "lbl_pub_listing"):
+            self.lbl_pub_listing.configure(text=" · ".join(parts))
 
     def _publish_texts_folder(self):
         from bravelgo.publish.config import save_publish_section
@@ -971,6 +1095,9 @@ class App(ModernApp):
             return
 
         pub = self._publish_collect()
+        from bravelgo.publish.manual_io import save_manual_to_cache
+
+        save_manual_to_cache(self.cfg, pub, log=None)
         save_publish_section(self.cfg, pub)
         cfg_save(self.cfg)
         self._publish_show_profile()
@@ -991,7 +1118,10 @@ class App(ModernApp):
         elif step == "console":
             self.log("Console = Firefox opens → Play Console (Continue when on Console)")
         else:
-            self.log("Full publish = Firefox → Console wait → Docs → Console tasks")
+            if pub.get("skip_docs_flow"):
+                self.log("Full publish = Firefox → Console (your privacy URL, no Docs)")
+            else:
+                self.log("Full publish = Firefox → Docs → Console")
         self.set_status("Publish running…", "warn")
 
         script = os.path.join(BASE_DIR, "bravelgo", "run_publish.py")
@@ -1009,6 +1139,8 @@ class App(ModernApp):
             cmd.append("--no-vision")
         if not pub.get("wait_for_console", True):
             cmd.append("--no-wait-console")
+        if pub.get("skip_docs_flow"):
+            cmd.append("--skip-docs")
 
         detached = pub.get("detached", True)
 
@@ -1064,10 +1196,28 @@ class App(ModernApp):
         self.set_status("Publish finished — check Tail log", "ok")
 
     def _publish_apply_results(self, pub: dict):
+        from bravelgo.publish.manual_io import policy_from_pub
+
+        listing = pub.get("last_listing") or {}
+        if hasattr(self, "ent_pub_title"):
+            self.ent_pub_title.delete(0, tk.END)
+            self.ent_pub_title.insert(0, listing.get("title") or pub.get("app_name", ""))
+        if hasattr(self, "txt_pub_short"):
+            self.txt_pub_short.delete("1.0", tk.END)
+            self.txt_pub_short.insert(tk.END, listing.get("short", ""))
+        if hasattr(self, "txt_pub_full"):
+            self.txt_pub_full.delete("1.0", tk.END)
+            self.txt_pub_full.insert(tk.END, listing.get("full", ""))
+        if hasattr(self, "txt_pub_policy"):
+            self.txt_pub_policy.delete("1.0", tk.END)
+            self.txt_pub_policy.insert(tk.END, policy_from_pub(pub))
         url = pub.get("last_privacy_url", "")
-        if url:
+        if url and hasattr(self, "ent_pub_privacy_url"):
             self.ent_pub_privacy_url.delete(0, tk.END)
             self.ent_pub_privacy_url.insert(0, url)
+        if hasattr(self, "v_pub_skip_docs"):
+            self.v_pub_skip_docs.set(bool(pub.get("skip_docs_flow", True)))
+        self._publish_update_char_labels()
         self._publish_refresh_listing_label(pub)
 
     def _publish_tail_log(self):
