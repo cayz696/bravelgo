@@ -16,20 +16,29 @@ def is_status_dashboard_url(url: str) -> bool:
     return "status.play.google.com" in (url or "").lower()
 
 
-def is_create_app_page(page) -> bool:
+def is_create_app_form_url(url: str) -> bool:
+    """True only on the multi-step Create app wizard (name/package), not app-list home."""
+    low = (url or "").lower()
+    if "play.google.com/console" not in low:
+        return False
+    return "create-new-ap" in low or "/create/app" in low
+
+
+def is_app_list_home(page) -> bool:
+    """Empty account home: «Create your first app» — not the wizard yet."""
     url = page_url(page).lower()
-    if "create" in url and "play.google.com/console" in url:
+    if "app-list" in url or url.rstrip("/").endswith("/developers"):
         return True
     try:
-        pat = re.compile(
-            r"create\s+(new\s+)?app|créer|nouvelle application|создать приложение",
-            re.I,
-        )
-        if page.get_by_text(pat).count() > 0:
-            return True
+        pat = re.compile(r"create your first app|créez votre première|создайте первое", re.I)
+        return page.get_by_text(pat).count() > 0
     except Exception:
-        pass
-    return False
+        return False
+
+
+def is_create_app_page(page) -> bool:
+    """Still on the Create wizard (must submit before dashboard tasks)."""
+    return is_create_app_form_url(page_url(page))
 
 
 def is_app_dashboard_url(url: str) -> bool:

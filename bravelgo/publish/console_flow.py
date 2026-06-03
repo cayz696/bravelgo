@@ -8,7 +8,12 @@ from typing import Callable
 from bravelgo.publish.config import CONSOLE_URL
 from bravelgo.publish.human import pause, pause_long
 from bravelgo.publish import i18n
-from bravelgo.publish.page_guard import is_create_app_page, page_url
+from bravelgo.publish.page_guard import (
+    is_app_list_home,
+    is_create_app_form_url,
+    is_create_app_page,
+    page_url,
+)
 from bravelgo.publish.session_util import BrowserSessionDead
 from bravelgo.publish.ui_actions import PublishUI
 
@@ -21,12 +26,7 @@ def run_create_application(
 ) -> bool:
     log = ui.log
     log("Console: Create application")
-    try:
-        ui.click_button(i18n.CREATE_APP, "Create application link")
-    except Exception:
-        page.goto(CONSOLE_URL, wait_until="domcontentloaded")
-        pause_long()
-        ui.click_button(i18n.CREATE_APP, "Create application")
+    _ensure_create_app_wizard(page, ui)
     pause_long()
     _wait_stable(page)
 
@@ -61,10 +61,99 @@ def run_create_application(
     ui.click_radio_text(i18n.FREE, "Free or paid: For free")
     _check_all_declaration_boxes(page, log)
 
-    ui.click_button(i18n.CREATE_APPLICATION_BTN, "Create application button")
-    pause_long()
-    log("Create application submitted")
-    return True
+    submitted = _submit_create_application(page, ui)
+    if submitted:
+        log("Create application submitted — waiting for app dashboard…")
+        pause_long()
+        _wait_left_create_wizard(page, log)
+        return True
+    log(
+        "Create application NOT submitted — click the blue «Create app» button manually, "
+        "then re-run or Continue on the app dashboard"
+    )
+    return False
+
+
+def _ensure_create_app_wizard(page, ui: PublishUI) -> None:
+    """From app-list home → wizard; from console root → Create app link."""
+    if is_create_app_form_url(page_url(page)):
+        return
+    if is_app_list_home(page) or "app-list" in page_url(page).lower():
+        ui.log("App list home — opening Create app wizard")
+        if not ui.click_button(i18n.CREATE_APP, "Create app on home"):
+            _click_button_by_text_js(page, r"create\s+app|créer|создать", ui.log)
+        pause_long()
+        _wait_stable(page)
+        return
+    try:
+        ui.click_button(i18n.CREATE_APP, "Create application link")
+    except Exception:
+        page.goto(CONSOLE_URL, wait_until="domcontentloaded")
+        pause_long()
+        ui.click_button(i18n.CREATE_APP, "Create application")
+
+
+def _submit_create_application(page, ui: PublishUI) -> bool:
+    if ui.click_button(i18n.CREATE_APPLICATION_BTN, "Create app submit button"):
+        return True
+    return _click_button_by_text_js(
+        page,
+        r"^create\s+app$|^create\s+application$|créer|создать",
+        ui.log,
+        prefer_bottom=True,
+    )
+
+
+def _click_button_by_text_js(
+    page, pattern: str, log: Callable[[str], None], *, prefer_bottom: bool = False
+) -> bool:
+    driver = getattr(page, "_driver", None)
+    if driver is None:
+        return False
+    try:
+        ok = driver.execute_script(
+            """
+            const re = new RegExp(arguments[0], 'i');
+            const bottom = arguments[1];
+            const nodes = [...document.querySelectorAll('button, [role="button"], a.button')]
+              .filter(el => {
+                const r = el.getBoundingClientRect();
+                const s = getComputedStyle(el);
+                return r.width > 2 && r.height > 2 && s.visibility !== 'hidden';
+              })
+              .map(el => ({
+                el,
+                text: (el.innerText || el.textContent || '').trim(),
+                y: el.getBoundingClientRect().top
+              }))
+              .filter(x => x.text && re.test(x.text));
+            if (!nodes.length) return false;
+            nodes.sort((a, b) => bottom ? b.y - a.y : a.y - b.y);
+            nodes[0].el.scrollIntoView({block: 'center'});
+            nodes[0].el.click();
+            return true;
+            """,
+            pattern,
+            prefer_bottom,
+        )
+        if ok:
+            log(f"Clicked button by text /{pattern}/")
+        return bool(ok)
+    except Exception as exc:
+        log(f"JS button click failed: {exc}")
+        return False
+
+
+def _wait_left_create_wizard(page, log: Callable[[str], None], timeout_sec: float = 45) -> None:
+    import time
+
+    deadline = time.time() + timeout_sec
+    while time.time() < deadline:
+        if not is_create_app_form_url(page_url(page)):
+            log(f"Left create wizard → {page_url(page)[:90]}")
+            return
+        time.sleep(1.5)
+    log("WARN: still on create-new-ap after submit — finish Create app manually")
 
 
 def _fill_create_app_input(page, selector: str, fallback_index: int, text: str, label: str, log) -> None:
@@ -143,11 +232,10 @@ def run_console_setup(
     log = ui.log
 
     if is_create_app_page(page):
-        log(f"Stopped: still on Create app form ({page_url(page)[:80]})")
+        log(f"Stopped: still on Create app wizard ({page_url(page)[:80]})")
         raise RuntimeError(
-            "Playbook order: finish «Create application» first (submit the form), "
-            "then open the app dashboard and click Continue again. "
-            "Privacy URL is filled only under «Set privacy policy» task — not on Create app."
+            "Submit «Create app» on the wizard first (blue button at bottom), "
+            "then open the app dashboard. Privacy URL goes in «Set privacy policy» task only."
         )
 
     def _step(name: str, fn) -> None:

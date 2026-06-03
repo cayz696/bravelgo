@@ -282,7 +282,11 @@ def run_publish(
                     )
             else:
                 log("Playbook step 1/2: Create application (name + package — NOT privacy URL)")
-                run_create_application(page, app_name, package, ui)
+                created = run_create_application(page, app_name, package, ui)
+                if not created:
+                    log("Step 2/2 skipped — Create app not submitted; finish wizard manually")
+                    completed = False
+                    return result
                 log("Playbook step 2/2: Console dashboard tasks (privacy URL is task #1 there)")
 
             console_ok = False
@@ -300,6 +304,9 @@ def run_publish(
             except BrowserSessionDead as exc:
                 log(str(exc))
                 log("Finish remaining Console steps manually — restart Full publish with Firefox open")
+            except RuntimeError as exc:
+                log(f"Console automation stopped: {exc}")
+                log("Browser stays open — submit Create app or finish tasks manually")
             except Exception as exc:
                 log(f"Console automation stopped: {str(exc)[:200]}")
                 log("Finish remaining Console steps manually in the open Firefox window")
