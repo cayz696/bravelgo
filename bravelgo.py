@@ -916,6 +916,7 @@ class App(ModernApp):
 
     def _publish_check_setup(self):
         """Main-thread check — shows what worker will receive."""
+        from bravelgo.publish.config import save_publish_section
         from bravelgo.publish.manual_io import listing_from_pub, save_manual_to_cache, should_skip_docs
         from bravelgo.publish.paths import read_privacy_url_file, write_privacy_url_file
 
