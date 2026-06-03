@@ -973,10 +973,9 @@ class App(ModernApp):
                 )
 
     def _publish_continue_signal(self):
-        from pathlib import Path
-
-        flag = Path(USER_HOME) / ".bravelgo-publish-go"
-        flag.write_text("go\n", encoding="utf-8")
+        flag = os.path.join(USER_HOME, ".bravelgo-publish-go")
+        with open(flag, "w", encoding="utf-8") as f:
+            f.write("go\n")
         _run(f"chown {REAL_USER}:{REAL_USER} '{flag}'")
         self.log(f"Continue signal sent → {flag}")
         self.set_status("Continue sent", "ok")
@@ -1160,7 +1159,7 @@ class App(ModernApp):
         self._publish_show_profile()
 
         if step != "generate" and not ensure_publish_deps(log=self.log, real_user=REAL_USER):
-            self.set_status("Publish blocked — Reinstall Firefox (Warmup)", "idle")
+            self.set_status("Publish blocked — Reinstall Firefox", "idle")
             self._publish_spawn_guard = False
             return
 
@@ -1168,7 +1167,7 @@ class App(ModernApp):
 
         stop_publish_workers(self.log)
         try:
-            (Path(USER_HOME) / ".bravelgo-publish-go").unlink(missing_ok=True)
+            os.remove(os.path.join(USER_HOME, ".bravelgo-publish-go"))
         except OSError:
             pass
 

@@ -25,14 +25,25 @@ def ensure_publish_deps(*, log: Callable[[str], None], real_user: str) -> bool:
     if os.geteuid() == 0:
         from bravelgo.deps import ensure_warmup_deps
 
-        if not ensure_warmup_deps(log, user):
+        if not ensure_warmup_deps(_publish_dep_log(log), user):
             return False
     elif not _geckodriver_present():
-        log("geckodriver missing — run BravelGo as sudo and Reinstall Firefox (Warmup)")
+        log("geckodriver missing — run BravelGo as sudo and Reinstall Firefox")
         return False
 
     log("Publish deps OK (Selenium + Firefox)")
     return True
+
+
+def _publish_dep_log(log: Callable[[str], None]) -> Callable[[str], None]:
+    def wrapped(msg: str) -> None:
+        text = msg or ""
+        if text.startswith("Warmup ready ·"):
+            log(text.replace("Warmup ready", "Publish browser ready", 1))
+            return
+        log(text)
+
+    return wrapped
 
 
 def _validate_user(real_user: str) -> str | None:
