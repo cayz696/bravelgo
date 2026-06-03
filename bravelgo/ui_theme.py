@@ -329,7 +329,76 @@ class ModernApp:
         lbl.pack(side="left", fill="x", expand=True)
         return lbl
 
-    def _hint(self, parent, text: str):
+    def _hint(self, parent, text: str, bg: str | None = None):
         wrap = getattr(self, "_hint_wrap", 900)
-        tk.Label(parent, text=text, font=FONT_SM, fg=C.TEXT3, bg=C.SURFACE,
-                 justify="left", wraplength=wrap).pack(fill="x", pady=(0, 8))
+        tk.Label(
+            parent,
+            text=text,
+            font=FONT_SM,
+            fg=C.TEXT3,
+            bg=bg or C.SURFACE,
+            justify="left",
+            wraplength=wrap,
+        ).pack(fill="x", pady=(0, 8))
+
+    def _scrollable_panel(self, parent) -> tk.Frame:
+        """Scrollable inner frame — parent must use grid with row weight on container."""
+        container = tk.Frame(parent, bg=C.BG)
+        container.grid(row=1, column=0, sticky="nsew")
+        container.grid_rowconfigure(0, weight=1)
+        container.grid_columnconfigure(0, weight=1)
+
+        canvas = tk.Canvas(container, bg=C.BG, highlightthickness=0, borderwidth=0)
+        vsb = ttk.Scrollbar(container, orient="vertical", command=canvas.yview)
+        canvas.configure(yscrollcommand=vsb.set)
+        canvas.grid(row=0, column=0, sticky="nsew")
+        vsb.grid(row=0, column=1, sticky="ns")
+
+        inner = tk.Frame(canvas, bg=C.BG)
+        win = canvas.create_window((0, 0), window=inner, anchor="nw")
+
+        def _on_inner_configure(_event=None):
+            canvas.configure(scrollregion=canvas.bbox("all"))
+
+        def _on_canvas_configure(event):
+            canvas.itemconfigure(win, width=event.width)
+
+        inner.bind("<Configure>", _on_inner_configure)
+        canvas.bind("<Configure>", _on_canvas_configure)
+
+        def _wheel(event):
+            delta = 0
+            if hasattr(event, "delta") and event.delta:
+                delta = -1 * int(event.delta / 120)
+            elif getattr(event, "num", None) == 4:
+                delta = -1
+            elif getattr(event, "num", None) == 5:
+                delta = 1
+            if delta:
+                canvas.yview_scroll(delta, "units")
+
+        def _bind_wheel(_event=None):
+            canvas.bind_all("<MouseWheel>", _wheel)
+            canvas.bind_all("<Button-4>", _wheel)
+            canvas.bind_all("<Button-5>", _wheel)
+
+        def _unbind_wheel(_event=None):
+            for seq in ("<MouseWheel>", "<Button-4>", "<Button-5>"):
+                canvas.unbind_all(seq)
+
+        canvas.bind("<Enter>", _bind_wheel)
+        canvas.bind("<Leave>", _unbind_wheel)
+        return inner
+
+    def _action_toolbar(self, parent, title: str = "Actions") -> tk.Frame:
+        """Fixed top toolbar (does not scroll). Parent: grid row=0."""
+        bar = tk.Frame(parent, bg=C.BORDER, padx=1, pady=1)
+        bar.grid(row=0, column=0, sticky="ew", pady=(0, 8))
+        inner = tk.Frame(bar, bg=C.ELEVATED, padx=12, pady=10)
+        inner.pack(fill="x")
+        tk.Label(
+            inner, text=title.upper(), font=FONT_SM, fg=C.TEXT3, bg=C.ELEVATED, anchor="w",
+        ).pack(fill="x", pady=(0, 8))
+        btn_row = tk.Frame(inner, bg=C.ELEVATED)
+        btn_row.pack(fill="x")
+        return btn_row

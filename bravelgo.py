@@ -636,102 +636,106 @@ class App(ModernApp):
         from bravelgo.publish.config import merge_publish_config
 
         p = self.tab_publish
+        p.grid_rowconfigure(1, weight=1)
+        p.grid_columnconfigure(0, weight=1)
+
         pub = merge_publish_config(self.cfg)
+
+        # Fixed action bar — always visible (not scrolled away)
+        btn_row = self._action_toolbar(p, "Start publish")
+        r1 = tk.Frame(btn_row, bg=C.ELEVATED)
+        r1.pack(fill="x", pady=(0, 6))
+        self._btn(
+            r1, "▶  Full publish", self._publish_thread_full,
+            variant="primary", side="left", padx=(0, 8),
+        )
+        self._btn(
+            r1, "Continue — on Console", self._publish_continue_signal,
+            variant="success", side="left", padx=(0, 8),
+        )
+        self._btn(r1, "Generate texts", self._publish_thread_generate, variant="ghost", side="left", padx=(0, 6))
+        r2 = tk.Frame(btn_row, bg=C.ELEVATED)
+        r2.pack(fill="x")
+        self._btn(r2, "Docs only", self._publish_thread_docs, variant="ghost", side="left", padx=(0, 6))
+        self._btn(r2, "Console only", self._publish_thread_console, variant="ghost", side="left", padx=(0, 6))
+        self._btn(r2, "Save settings", self._publish_save, variant="ghost", side="left", padx=(0, 6))
+        self._btn(r2, "Tail log", self._publish_tail_log, variant="ghost", side="left")
         self._hint(
-            self._card(p, "Play publish (UI automation)"),
-            "System Firefox (deb) + auto-detected Mozilla profile · Playwright.\n"
-            "Gemini Vision for any UI language · detached background like Warmup.\n"
-            "Opens browser → you go to Play Console → Continue → Docs + Console tasks.",
+            btn_row.master,
+            "1) Save settings  2) Generate texts  3) Full publish  4) On Console → Continue",
+            bg=C.ELEVATED,
         )
 
-        pf = self._card(p, "Firefox profile (auto)")
-        self.lbl_pub_profile = tk.Label(pf, text="", fg=C.TEXT2, bg=C.SURFACE, justify="left", anchor="w")
+        scroll = self._scrollable_panel(p)
+
+        self._hint(
+            self._card(scroll, "Play publish"),
+            "Firefox profile + proxy (user.js) · Playwright · Gemini Vision · detached log.",
+        )
+
+        pf = self._card(scroll, "Firefox profile (auto)")
+        self.lbl_pub_profile = tk.Label(
+            pf, text="", fg=C.TEXT2, bg=C.SURFACE, justify="left", anchor="w", wraplength=700,
+        )
         self.lbl_pub_profile.pack(fill="x")
         self._publish_show_profile()
 
-        acc = self._card(p, "Account & app")
-        g = tk.Frame(acc, bg=C.SURFACE)
-        g.pack(fill="x")
-        def _pub_entry(parent, width=40):
+        acc = self._card(scroll, "Account & app")
+
+        def _pub_field(parent, label: str, attr: str):
+            row = tk.Frame(parent, bg=C.SURFACE)
+            row.pack(fill="x", pady=(0, 8))
+            row.grid_columnconfigure(1, weight=1)
+            tk.Label(row, text=label, fg=C.TEXT2, bg=C.SURFACE, anchor="w").grid(row=0, column=0, sticky="w", padx=(0, 10))
             e = tk.Entry(
-                parent, width=width, bg=C.INPUT_BG, fg=C.INPUT_FG, insertbackground=C.ACCENT,
+                row, bg=C.INPUT_BG, fg=C.INPUT_FG, insertbackground=C.ACCENT,
                 relief="flat", highlightthickness=1,
                 highlightbackground=C.BORDER, highlightcolor=C.BORDER_FOCUS,
                 font=FONT_MONO,
             )
-            e.pack(side="left", fill="x", expand=True, ipady=6)
+            e.grid(row=0, column=1, sticky="ew", ipady=6)
+            setattr(self, attr, e)
             return e
 
-        for label, attr, width in (
-            ("Account email", "ent_pub_email", 42),
-            ("Package name", "ent_pub_package", 42),
-            ("App name", "ent_pub_app", 36),
-        ):
-            row = tk.Frame(g, bg=C.SURFACE)
-            row.pack(fill="x", pady=(0, 6))
-            tk.Label(row, text=label, fg=C.TEXT2, bg=C.SURFACE, width=14, anchor="w").pack(side="left")
-            setattr(self, attr, _pub_entry(row, width))
+        _pub_field(acc, "Email", "ent_pub_email")
+        _pub_field(acc, "Package", "ent_pub_package")
+        _pub_field(acc, "App name", "ent_pub_app")
         self.ent_pub_email.insert(0, pub.get("account_email", ""))
         self.ent_pub_package.insert(0, pub.get("package_name", ""))
         self.ent_pub_app.insert(0, pub.get("app_name", ""))
 
-        row2 = tk.Frame(acc, bg=C.SURFACE)
-        row2.pack(fill="x", pady=(4, 0))
+        opts = tk.Frame(acc, bg=C.SURFACE)
+        opts.pack(fill="x", pady=(4, 0))
         self.v_pub_app_exists = tk.BooleanVar(value=bool(pub.get("app_already_exists")))
-        ttk.Checkbutton(
-            row2,
-            text="App already exists in Console (skip Create application)",
-            variable=self.v_pub_app_exists,
-        ).pack(anchor="w")
         self.v_pub_vision = tk.BooleanVar(value=bool(pub.get("use_vision", True)))
-        ttk.Checkbutton(row2, text="Gemini Vision (any Console language)", variable=self.v_pub_vision).pack(anchor="w")
         self.v_pub_wait = tk.BooleanVar(value=bool(pub.get("wait_for_console", True)))
-        ttk.Checkbutton(
-            row2,
-            text="Wait for Play Console before automation (Continue button)",
-            variable=self.v_pub_wait,
-        ).pack(anchor="w")
         self.v_pub_detached = tk.BooleanVar(value=bool(pub.get("detached", True)))
-        ttk.Checkbutton(
-            row2,
-            text="Detached — runs in background (like Warmup)",
-            variable=self.v_pub_detached,
-        ).pack(anchor="w")
+        for txt, var in (
+            ("App already in Console (skip create)", self.v_pub_app_exists),
+            ("Gemini Vision (any language)", self.v_pub_vision),
+            ("Wait for Console + Continue button", self.v_pub_wait),
+            ("Detached background (like Warmup)", self.v_pub_detached),
+        ):
+            ttk.Checkbutton(opts, text=txt, variable=var).pack(anchor="w")
 
-        gf = self._card(p, "Gemini API (per VM profile)")
-        kr = tk.Frame(gf, bg=C.SURFACE)
-        kr.pack(fill="x")
-        tk.Label(kr, text="API key", fg=C.TEXT2, bg=C.SURFACE, width=14, anchor="w").pack(side="left")
-        self.ent_pub_gemini = tk.Entry(
-            kr, width=48, show="*", bg=C.INPUT_BG, fg=C.INPUT_FG, insertbackground=C.ACCENT,
-            relief="flat", highlightthickness=1,
-            highlightbackground=C.BORDER, highlightcolor=C.BORDER_FOCUS,
-            font=FONT_MONO,
-        )
-        self.ent_pub_gemini.pack(side="left", fill="x", expand=True, ipady=6)
+        gf = self._card(scroll, "Gemini & graphics")
+        _pub_field(gf, "API key", "ent_pub_gemini")
+        self.ent_pub_gemini.configure(show="*")
+        self.ent_pub_gemini.delete(0, tk.END)
         self.ent_pub_gemini.insert(0, pub.get("gemini_api_key", ""))
-
-        gr = tk.Frame(gf, bg=C.SURFACE)
-        gr.pack(fill="x", pady=(8, 0))
-        tk.Label(gr, text="Graphics folder", fg=C.TEXT2, bg=C.SURFACE, width=14, anchor="w").pack(side="left")
-        self.ent_pub_graphics = tk.Entry(
-            gr, width=48, bg=C.INPUT_BG, fg=C.INPUT_FG, insertbackground=C.ACCENT,
-            relief="flat", highlightthickness=1,
-            highlightbackground=C.BORDER, highlightcolor=C.BORDER_FOCUS,
-            font=FONT_MONO,
-        )
-        self.ent_pub_graphics.pack(side="left", fill="x", expand=True, ipady=6)
+        _pub_field(gf, "Graphics dir", "ent_pub_graphics")
+        self.ent_pub_graphics.delete(0, tk.END)
         self.ent_pub_graphics.insert(0, pub.get("graphics_dir", ""))
 
-        pf = self._card(p, "Listing prompt (editable)", expand=True)
-        self.txt_pub_listing_prompt = self._text(pf, height=8, mono=True, readonly=False)
+        lp = self._card(scroll, "Listing prompt")
+        self.txt_pub_listing_prompt = self._text(lp, height=5, mono=True, readonly=False)
         self.txt_pub_listing_prompt.insert(tk.END, pub.get("listing_prompt", ""))
 
-        pp = self._card(p, "Privacy prompt (editable)", expand=True)
-        self.txt_pub_privacy_prompt = self._text(pp, height=6, mono=True, readonly=False)
+        pp = self._card(scroll, "Privacy prompt")
+        self.txt_pub_privacy_prompt = self._text(pp, height=4, mono=True, readonly=False)
         self.txt_pub_privacy_prompt.insert(tk.END, pub.get("privacy_prompt", ""))
 
-        out = self._card(p, "Last run")
+        out = self._card(scroll, "Last run")
         tk.Label(out, text="Privacy URL", fg=C.TEXT2, bg=C.SURFACE).pack(anchor="w")
         self.ent_pub_privacy_url = tk.Entry(
             out, bg=C.INPUT_BG, fg=C.INPUT_FG, insertbackground=C.ACCENT,
@@ -741,33 +745,20 @@ class App(ModernApp):
         )
         self.ent_pub_privacy_url.pack(fill="x", pady=(4, 6), ipady=6)
         self.ent_pub_privacy_url.insert(0, pub.get("last_privacy_url", ""))
-        self.lbl_pub_listing = tk.Label(out, text="", fg=C.TEXT2, bg=C.SURFACE, justify="left", anchor="w")
+        self.lbl_pub_listing = tk.Label(
+            out, text="", fg=C.TEXT2, bg=C.SURFACE, justify="left", anchor="w", wraplength=700,
+        )
         self.lbl_pub_listing.pack(fill="x")
         self._publish_refresh_listing_label(pub)
 
-        cf = tk.Frame(p, bg=C.BG)
-        cf.pack(fill="x", pady=(0, 6))
-        self._btn(
-            cf,
-            "Continue — I'm on Console",
-            self._publish_continue_signal,
-            variant="primary",
-            side="left",
-            padx=(0, 8),
-        )
-        self._hint(
-            cf,
-            "While publish runs: open play.google.com/console, then press Continue.",
-        )
+        def _update_wrap(event=None):
+            w = max(320, self.root.winfo_width() - 80)
+            self._hint_wrap = w
+            self.lbl_pub_profile.configure(wraplength=w)
+            self.lbl_pub_listing.configure(wraplength=w)
 
-        bf = tk.Frame(p, bg=C.BG)
-        bf.pack(fill="x", pady=(0, 8))
-        self._btn(bf, "Save settings", self._publish_save, variant="ghost", side="left", padx=(0, 6))
-        self._btn(bf, "Generate texts", self._publish_thread_generate, variant="ghost", side="left", padx=(0, 6))
-        self._btn(bf, "Docs only", self._publish_thread_docs, variant="ghost", side="left", padx=(0, 6))
-        self._btn(bf, "Console only", self._publish_thread_console, variant="ghost", side="left", padx=(0, 6))
-        self._btn(bf, "Full publish", self._publish_thread_full, variant="primary", side="left", padx=(0, 6))
-        self._btn(bf, "Tail log", self._publish_tail_log, variant="ghost", side="left")
+        self.root.bind("<Configure>", _update_wrap, add="+")
+        _update_wrap()
 
     def _publish_collect(self) -> dict:
         from bravelgo.publish.config import merge_publish_config
