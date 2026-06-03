@@ -119,6 +119,33 @@ def try_acquire_lock() -> tuple[object | None, str]:
     return fh, ""
 
 
+def stop_publish_workers(log=None) -> None:
+    """Stop any detached run_publish.py so Full publish does not fight with old Generate."""
+    import subprocess
+
+    pid = read_lock_pid()
+    if pid and _pid_alive(pid):
+        try:
+            os.kill(pid, 15)
+            time.sleep(0.4)
+            if _pid_alive(pid):
+                os.kill(pid, 9)
+        except OSError:
+            pass
+        if log:
+            log(f"Stopped publish worker pid {pid}")
+    clear_stale_publish_lock(force=True)
+    try:
+        subprocess.run(
+            ["pkill", "-f", "run_publish.py"],
+            capture_output=True,
+            timeout=5,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        pass
+    time.sleep(0.3)
+
+
 def release_lock(fh) -> None:
     import fcntl
 

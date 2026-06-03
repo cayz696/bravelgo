@@ -120,6 +120,13 @@ def _generate_texts(
             policy = policy or stub_policy(app_name, email)
             persist_texts(cfg, listing=listing, policy=policy, log=log)
             return listing, policy
+        if listing and not policy:
+            persist_texts(cfg, listing=listing, log=log)
+            log(
+                "Listing saved. Policy failed (429) — paste Privacy URL, check Skip Google Docs, "
+                "then Full publish (no Gemini)"
+            )
+            return listing, ""
         if listing:
             persist_texts(cfg, listing=listing, log=log)
         raise ValueError(str(exc)) from exc
@@ -150,7 +157,7 @@ def run_publish(
     api_key = pub.get("gemini_api_key", "").strip()
     use_vision = use_vision and bool(pub.get("use_vision", True))
     wait_console = wait_console and bool(pub.get("wait_for_console", True))
-    skip_docs = skip_docs or bool(pub.get("skip_docs_flow"))
+    skip_docs = skip_docs or bool(pub.get("skip_docs_flow")) or bool(privacy_url_from_pub(pub))
     country = (cfg.get("country") or pub.get("country") or "FR").strip()
 
     if not email or not package or not app_name:
@@ -176,13 +183,17 @@ def run_publish(
     validate_for_browser_step(pub, step)
     listing, policy = _load_cached_texts(pub, package, app_name, log)
     if not listing:
-        raise ValueError("No listing — fill manual fields and Save")
+        raise ValueError("No listing — fill manual fields and Save manual texts")
     result["listing"] = listing
     result["policy_text"] = policy or ""
-    log("Manual / saved texts — Gemini skipped")
+    privacy_url = privacy_url_from_pub(pub)
+    log(
+        f"Ready: listing short={len(listing.get('short', ''))} "
+        f"full={len(listing.get('full', ''))} · privacy URL={'yes' if privacy_url else 'NO'} · "
+        f"skip_docs={skip_docs}"
+    )
 
     policy_text = policy or ""
-    privacy_url = privacy_url_from_pub(pub)
 
     need_browser = step in ("all", "docs", "console")
     if not need_browser:
@@ -225,15 +236,22 @@ def run_publish(
                 raise ValueError("No privacy URL — paste link in Publish tab")
             if not skip_create and not pub.get("app_already_exists"):
                 run_create_application(page, app_name, package, ui)
-            run_console_setup(
-                page,
-                account_email=email,
-                package_name=package,
-                privacy_url=privacy_url,
-                listing=listing,
-                graphics_dir=pub.get("graphics_dir", ""),
-                ui=ui,
-            )
+            try:
+                run_console_setup(
+                    page,
+                    account_email=email,
+                    package_name=package,
+                    privacy_url=privacy_url,
+                    listing=listing,
+                    graphics_dir=pub.get("graphics_dir", ""),
+                    ui=ui,
+                )
+            except Exception as exc:
+                import traceback
+
+                log(f"Console automation error: {exc}")
+                log(traceback.format_exc()[-800:])
+                raise
     finally:
         close_browser(driver, None, log)
 

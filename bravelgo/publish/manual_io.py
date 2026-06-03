@@ -43,10 +43,12 @@ def validate_for_browser_step(pub: dict, step: str) -> None:
         )
 
     url = privacy_url_from_pub(pub)
-    skip_docs = bool(pub.get("skip_docs_flow"))
+    skip_docs = bool(pub.get("skip_docs_flow")) or bool(url)
 
     if step in ("all", "console") and not url:
-        raise ValueError("Privacy policy URL is empty — paste your link or uncheck «Skip Google Docs»")
+        raise ValueError(
+            "Privacy policy URL is empty — paste your link in «Privacy policy URL» and Save manual texts"
+        )
 
     if step in ("all", "docs") and not skip_docs:
         if not policy_from_pub(pub):

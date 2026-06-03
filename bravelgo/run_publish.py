@@ -49,6 +49,11 @@ def main() -> None:
     )
     args = parser.parse_args()
 
+    from bravelgo.publish.lock_util import stop_publish_workers
+    from bravelgo.publish.manual_io import privacy_url_from_pub
+
+    stop_publish_workers()
+
     lock, err = try_acquire_lock()
     if lock is None:
         print(f"[*] FATAL: {err}", flush=True)
@@ -103,14 +108,21 @@ def main() -> None:
             skip_create=args.skip_create or pub.get("app_already_exists", False),
             wait_console=not args.no_wait_console,
             use_vision=not args.no_vision,
-            skip_docs=args.skip_docs or bool(pub.get("skip_docs_flow")),
+            skip_docs=args.skip_docs
+            or bool(pub.get("skip_docs_flow"))
+            or bool(privacy_url_from_pub(pub)),
         )
         save_cfg(cfg)
         if result.get("privacy_url"):
             log(f"Privacy URL: {result['privacy_url']}")
         log("Done")
     except Exception as exc:
+        import traceback
+
         log(f"FATAL: {exc}")
+        for ln in traceback.format_exc().splitlines()[-8:]:
+            if ln.strip():
+                log(ln)
         sys.exit(1)
     finally:
         release_lock(lock)

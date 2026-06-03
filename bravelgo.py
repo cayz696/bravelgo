@@ -889,8 +889,8 @@ class App(ModernApp):
         pub["use_vision"] = self.v_pub_vision.get()
         pub["wait_for_console"] = self.v_pub_wait.get()
         pub["detached"] = self.v_pub_detached.get()
-        pub["skip_docs_flow"] = self.v_pub_skip_docs.get()
         pub["last_privacy_url"] = self.ent_pub_privacy_url.get().strip()
+        pub["skip_docs_flow"] = self.v_pub_skip_docs.get() or bool(pub["last_privacy_url"])
         pub["manual_policy_text"] = self.txt_pub_policy.get("1.0", tk.END).strip()
         title = self.ent_pub_title.get().strip() or pub["app_name"]
         pub["last_listing"] = {
@@ -1107,7 +1107,13 @@ class App(ModernApp):
             self._publish_spawn_guard = False
             return
 
+        from bravelgo.publish.lock_util import stop_publish_workers
+
+        stop_publish_workers(self.log)
         clear_continue_flag()
+
+        if pub.get("last_privacy_url"):
+            pub["skip_docs_flow"] = True
 
         self.log(f"Publish start · step={step} · {pub.get('package_name')}")
         self.log(f"Profile: {profile}")
@@ -1139,12 +1145,14 @@ class App(ModernApp):
             cmd.append("--no-vision")
         if not pub.get("wait_for_console", True):
             cmd.append("--no-wait-console")
-        if pub.get("skip_docs_flow"):
+        if pub.get("skip_docs_flow") or pub.get("last_privacy_url"):
             cmd.append("--skip-docs")
 
         detached = pub.get("detached", True)
 
         try:
+            save_publish_section(self.cfg, pub)
+            cfg_save(self.cfg)
             _run(f"chown {REAL_USER}:{REAL_USER} '{log_path}' 2>/dev/null; rm -f '{USER_HOME}/.bravelgo-publish.lock'")
 
             if detached:
