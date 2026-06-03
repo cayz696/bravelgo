@@ -28,6 +28,11 @@ def privacy_url_from_pub(pub: dict) -> str:
     return (pub.get("last_privacy_url") or "").strip()
 
 
+def should_skip_docs(pub: dict, skip_docs_flag: bool = False) -> bool:
+    """Privacy URL in BravelGo = do not create a new doc in Google Docs."""
+    return bool(skip_docs_flag) or bool(pub.get("skip_docs_flow")) or bool(privacy_url_from_pub(pub))
+
+
 def save_manual_to_cache(
     cfg: dict,
     pub: dict,
@@ -55,7 +60,7 @@ def validate_for_browser_step(pub: dict, step: str) -> None:
         )
 
     url = privacy_url_from_pub(pub)
-    skip_docs = bool(pub.get("skip_docs_flow"))
+    skip_docs = should_skip_docs(pub)
 
     if step in ("all", "console") and not url:
         raise ValueError(

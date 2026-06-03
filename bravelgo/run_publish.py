@@ -110,7 +110,7 @@ def main() -> None:
             skip_create=args.skip_create or pub.get("app_already_exists", False),
             wait_console=not args.no_wait_console,
             use_vision=not args.no_vision,
-            skip_docs=args.skip_docs or bool(pub.get("skip_docs_flow")),
+            skip_docs=bool(args.skip_docs) or bool(pub.get("skip_docs_flow")) or bool(pub.get("last_privacy_url")),
         )
         save_cfg(cfg, home)
         if result.get("privacy_url"):

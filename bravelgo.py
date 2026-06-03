@@ -767,7 +767,7 @@ class App(ModernApp):
         priv = self._card(scroll, "Privacy policy")
         self._hint(
             priv,
-            "If you already have a public policy link, paste URL and enable «Skip Google Docs».",
+            "Paste your public policy link here — Google Docs will NOT be opened (we use this URL as-is).",
         )
         tk.Label(priv, text="Privacy policy URL (required for Console)", fg=C.TEXT2, bg=C.SURFACE, anchor="w").pack(
             anchor="w"
@@ -1145,7 +1145,7 @@ class App(ModernApp):
             cmd.append("--no-vision")
         if not pub.get("wait_for_console", True):
             cmd.append("--no-wait-console")
-        if pub.get("skip_docs_flow"):
+        if privacy_url or pub.get("skip_docs_flow"):
             cmd.append("--skip-docs")
 
         detached = pub.get("detached", True)

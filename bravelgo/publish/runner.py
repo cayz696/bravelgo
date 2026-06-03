@@ -15,6 +15,7 @@ from bravelgo.publish.manual_io import (
     policy_from_pub,
     privacy_url_from_pub,
     save_manual_to_cache,
+    should_skip_docs,
     validate_for_browser_step,
 )
 from bravelgo.publish.cache_io import load_listing_cache, load_policy_cache, listing_ready, persist_texts
@@ -166,7 +167,7 @@ def run_publish(
     api_key = pub.get("gemini_api_key", "").strip()
     use_vision = use_vision and bool(pub.get("use_vision", True))
     wait_console = wait_console and bool(pub.get("wait_for_console", True))
-    skip_docs = skip_docs or bool(pub.get("skip_docs_flow"))
+    skip_docs = should_skip_docs(pub, skip_docs)
     country = (cfg.get("country") or pub.get("country") or "FR").strip()
 
     if not email or not package or not app_name:
@@ -237,7 +238,7 @@ def run_publish(
         elif step in ("all", "docs"):
             if privacy_url:
                 result["privacy_url"] = privacy_url
-                log(f"Skipping Google Docs — using your URL: {privacy_url[:70]}…")
+                log(f"Google Docs skipped — using your BravelGo URL: {privacy_url[:70]}…")
             else:
                 raise ValueError("Privacy URL required when Skip Google Docs is enabled")
 
