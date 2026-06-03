@@ -973,11 +973,12 @@ class App(ModernApp):
                 )
 
     def _publish_continue_signal(self):
-        from bravelgo.publish.wait_console import touch_continue_flag
+        from pathlib import Path
 
-        touch_continue_flag()
-        _run(f"chown {REAL_USER}:{REAL_USER} '{USER_HOME}/.bravelgo-publish-go'")
-        self.log("Continue signal sent — publish worker will proceed")
+        flag = Path(USER_HOME) / ".bravelgo-publish-go"
+        flag.write_text("go\n", encoding="utf-8")
+        _run(f"chown {REAL_USER}:{REAL_USER} '{flag}'")
+        self.log(f"Continue signal sent → {flag}")
         self.set_status("Continue sent", "ok")
 
     def _publish_save(self):
@@ -1109,7 +1110,6 @@ class App(ModernApp):
         from bravelgo.publish.deps import ensure_publish_deps
         from bravelgo.publish.lock_util import clear_stale_publish_lock, is_publish_running
         from bravelgo.publish.profile_resolve import resolve_profile_dir
-        from bravelgo.publish.wait_console import clear_continue_flag
 
         with self._publish_start_mtx:
             if getattr(self, "_publish_spawn_guard", False):
@@ -1167,7 +1167,10 @@ class App(ModernApp):
         from bravelgo.publish.lock_util import stop_publish_workers
 
         stop_publish_workers(self.log)
-        clear_continue_flag()
+        try:
+            (Path(USER_HOME) / ".bravelgo-publish-go").unlink(missing_ok=True)
+        except OSError:
+            pass
 
         self.log(f"Publish start · step={step} · {pub.get('package_name')}")
         self.log(f"Privacy URL ({len(privacy_url)} chars): {privacy_url[:85]}…")
