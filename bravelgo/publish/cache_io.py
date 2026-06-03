@@ -67,11 +67,12 @@ def persist_texts(
     except OSError as exc:
         if log:
             log(f"WARN: could not save ~/.bravelgo.json: {exc}")
-    elif log:
-        parts = []
-        if listing and listing_ready(listing):
-            parts.append("listing")
-        if policy:
-            parts.append("policy")
-        if parts:
-            log(f"Saved {' + '.join(parts)} → cache (Full publish can skip Gemini)")
+    else:
+        if log:
+            parts = []
+            if listing and listing_ready(listing):
+                parts.append("listing")
+            if policy:
+                parts.append("policy")
+            if parts:
+                log(f"Saved {' + '.join(parts)} → cache (Full publish can skip Gemini)")
