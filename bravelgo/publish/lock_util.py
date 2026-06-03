@@ -1,4 +1,4 @@
-"""Single publish worker — clear stale locks, avoid false 'already running'."""
+"""Single publish worker — one process at a time, no pkill suicide."""
 from __future__ import annotations
 
 import os
@@ -43,16 +43,11 @@ def is_publish_running() -> bool:
     if pid and _pid_alive(pid):
         return True
     if LOCK_F.is_file():
-        age = lock_age_sec()
-        if age is not None and age < 3:
-            return True
+        clear_stale_publish_lock(force=True)
     return False
 
 
 def clear_stale_publish_lock(log=None, *, force: bool = False) -> bool:
-    """
-    Remove lock / stop dead worker. Returns True if something was cleared.
-    """
     cleared = False
     pid = read_lock_pid()
 
@@ -70,18 +65,13 @@ def clear_stale_publish_lock(log=None, *, force: bool = False) -> bool:
                 log(f"Stopped previous publish worker (pid {pid})")
         else:
             return False
-    elif pid:
-        cleared = True
-        if log:
-            log(f"Cleared stale publish lock (pid {pid} was gone)")
+    elif pid and log:
+        log(f"Cleared stale lock (pid {pid} gone)")
 
     try:
-        if LOCK_F.is_file():
-            age = lock_age_sec()
-            if force or not pid or not _pid_alive(pid):
-                if force or age is None or age > STALE_SEC or not pid:
-                    LOCK_F.unlink(missing_ok=True)
-                    cleared = True
+        if LOCK_F.is_file() and (force or not pid or not _pid_alive(pid)):
+            LOCK_F.unlink(missing_ok=True)
+            cleared = True
     except OSError:
         pass
 
@@ -89,13 +79,9 @@ def clear_stale_publish_lock(log=None, *, force: bool = False) -> bool:
 
 
 def try_acquire_lock() -> tuple[object | None, str]:
-    """
-    Returns (file_handle, error_message).
-    file_handle must stay open until publish finishes.
-    """
     import fcntl
 
-    clear_stale_publish_lock()
+    clear_stale_publish_lock(force=True)
 
     LOCK_F.parent.mkdir(parents=True, exist_ok=True)
     fh = open(LOCK_F, "w", encoding="utf-8")
@@ -105,14 +91,14 @@ def try_acquire_lock() -> tuple[object | None, str]:
         fh.close()
         pid = read_lock_pid()
         if pid and _pid_alive(pid):
-            return None, f"Publish already running (pid {pid}) — wait or Tail log"
+            return None, f"Publish already running (pid {pid}) — Tail log or wait"
         clear_stale_publish_lock(force=True)
         fh = open(LOCK_F, "w", encoding="utf-8")
         try:
             fcntl.flock(fh.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
         except BlockingIOError:
             fh.close()
-            return None, "Publish lock busy — try again in a few seconds"
+            return None, "Publish lock busy — try again in 5 seconds"
 
     fh.write(f"pid={os.getpid()}\nstep=worker\n")
     fh.flush()
@@ -120,30 +106,21 @@ def try_acquire_lock() -> tuple[object | None, str]:
 
 
 def stop_publish_workers(log=None) -> None:
-    """Stop any detached run_publish.py so Full publish does not fight with old Generate."""
-    import subprocess
-
+    """Stop only the previous lock-holder — never pkill (that killed the new worker)."""
+    me = os.getpid()
     pid = read_lock_pid()
-    if pid and _pid_alive(pid):
+    if pid and pid != me and _pid_alive(pid):
         try:
             os.kill(pid, 15)
-            time.sleep(0.4)
+            time.sleep(0.5)
             if _pid_alive(pid):
                 os.kill(pid, 9)
         except OSError:
             pass
         if log:
-            log(f"Stopped publish worker pid {pid}")
+            log(f"Stopped old publish worker pid {pid}")
     clear_stale_publish_lock(force=True)
-    try:
-        subprocess.run(
-            ["pkill", "-f", "run_publish.py"],
-            capture_output=True,
-            timeout=5,
-        )
-    except (OSError, subprocess.TimeoutExpired):
-        pass
-    time.sleep(0.3)
+    time.sleep(0.2)
 
 
 def release_lock(fh) -> None:

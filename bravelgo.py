@@ -762,6 +762,7 @@ class App(ModernApp):
         mb = tk.Frame(manual, bg=C.SURFACE)
         mb.pack(fill="x", pady=(4, 0))
         self._btn(mb, "Save manual texts", self._publish_save_manual, variant="primary", side="left", padx=(0, 8))
+        self._btn(mb, "Check setup", self._publish_check_setup, variant="ghost", side="left", padx=(0, 8))
         self._btn(mb, "Save all settings", self._publish_save, variant="ghost", side="left")
 
         priv = self._card(scroll, "Privacy policy")
@@ -912,6 +913,36 @@ class App(ModernApp):
         self.lbl_pub_short_len.configure(text=f"{s}/80 characters")
         self.lbl_pub_full_len.configure(text=f"{f}/4000 characters")
         self.lbl_pub_policy_len.configure(text=f"{p} characters (Docs only)")
+
+    def _publish_check_setup(self):
+        """Main-thread check — shows what worker will receive."""
+        from bravelgo.publish.manual_io import listing_from_pub, save_manual_to_cache, should_skip_docs
+        from bravelgo.publish.paths import read_privacy_url_file, write_privacy_url_file
+
+        pub = self._publish_collect()
+        write_privacy_url_file(pub.get("last_privacy_url", ""), USER_HOME)
+        save_manual_to_cache(self.cfg, pub, log=self.log, user_home=USER_HOME)
+        save_publish_section(self.cfg, pub)
+        cfg_save(self.cfg)
+
+        url = pub.get("last_privacy_url", "")
+        listing = listing_from_pub(pub, pub.get("app_name", ""))
+        short = len(listing.get("short", ""))
+        full = len(listing.get("full", ""))
+        file_url = read_privacy_url_file(USER_HOME)
+        skip = should_skip_docs(pub, home=USER_HOME)
+
+        lines = [
+            f"Privacy URL ({len(url)} chars):\n{url or '(EMPTY — paste in field above)'}",
+            f"URL file: {file_url[:80] or '(empty)'}",
+            f"Listing: short {short}/80 · full {full}/4000",
+            f"Skip Google Docs: {skip}",
+            f"Config: {CONFIG_F}",
+        ]
+        self.log("── Publish check ──")
+        for ln in lines:
+            self.log(ln.replace("\n", " "))
+        self.show_info("Publish check", "\n\n".join(lines))
 
     def _publish_save_manual(self):
         from bravelgo.publish.config import save_publish_section
@@ -1193,7 +1224,8 @@ class App(ModernApp):
                     stderr=subprocess.DEVNULL,
                     start_new_session=True,
                 )
-                self.log(f"Detached worker → {log_path} (launcher pid {proc.pid})")
+                self.log(f"Worker cmd: python3 run_publish.py --step {step} --privacy-url <{len(privacy_url)} chars>")
+                self.log(f"Detached worker → {log_path} (sudo pid {proc.pid})")
                 if step == "generate":
                     self.log("Gemini may take 1–3 min on free tier — Tail log, do not click Generate again")
                 else:

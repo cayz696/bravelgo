@@ -63,10 +63,6 @@ def main() -> None:
     global LOG_F
     LOG_F = publish_log_path(home)
 
-    from bravelgo.publish.lock_util import stop_publish_workers
-
-    stop_publish_workers()
-
     lock, err = try_acquire_lock()
     if lock is None:
         print(f"[*] FATAL: {err}", flush=True)
