@@ -9,6 +9,7 @@ from bravelgo.publish.config import CONSOLE_URL
 from bravelgo.publish.human import pause, pause_long
 from bravelgo.publish import i18n
 from bravelgo.publish.page_guard import is_create_app_page, page_url
+from bravelgo.publish.session_util import BrowserSessionDead
 from bravelgo.publish.ui_actions import PublishUI
 
 
@@ -150,12 +151,18 @@ def run_console_setup(
         )
 
     def _step(name: str, fn) -> None:
+        if getattr(ui, "_session_dead", False):
+            return
         try:
             fn()
+        except BrowserSessionDead:
+            raise
         except Exception as exc:
             log(f"Task skipped ({name}): {str(exc)[:120]}")
         try:
             _return_dashboard(page, ui)
+        except BrowserSessionDead:
+            raise
         except Exception:
             pass
 

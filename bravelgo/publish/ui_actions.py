@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from typing import Callable
 
 from bravelgo.publish.human import pause, pause_long
+from bravelgo.publish.session_util import BrowserSessionDead, ensure_session, is_invalid_session_error
 from bravelgo.publish.vision import vision_act
 
 
@@ -15,8 +16,23 @@ class PublishUI:
     log: Callable[[str], None]
     gemini_api_key: str = ""
     use_vision: bool = True
+    _session_dead: bool = False
+
+    def _guard_session(self) -> bool:
+        if self._session_dead:
+            return False
+        try:
+            ensure_session(self.page)
+            return True
+        except BrowserSessionDead as exc:
+            self._session_dead = True
+            self.use_vision = False
+            self.log(str(exc))
+            return False
 
     def click_button(self, pattern: re.Pattern[str], goal: str, timeout: int = 12_000) -> bool:
+        if not self._guard_session():
+            return False
         try:
             self.page.get_by_role("button", name=pattern).first.click(timeout=timeout)
             pause(0.5, 1.5)
@@ -34,8 +50,14 @@ class PublishUI:
             pause(0.5, 1.5)
             return True
         except Exception as exc:
-            self.log(f"Click fail ({goal}): {exc}")
-        if self.use_vision and self.gemini_api_key:
+            if is_invalid_session_error(exc):
+                self._session_dead = True
+                self.use_vision = False
+                raise BrowserSessionDead(
+                    "Firefox window was closed or crashed — automation stopped."
+                ) from exc
+            self.log(f"Click fail ({goal}): {str(exc)[:100]}")
+        if self.use_vision and self.gemini_api_key and self._guard_session():
             self.log(f"Vision fallback: {goal}")
             if vision_act(self.page, self.gemini_api_key, f"Click button: {goal}", self.log):
                 pause_long()
@@ -45,6 +67,8 @@ class PublishUI:
     def save(self, overflow: bool = False) -> None:
         from bravelgo.publish import i18n
 
+        if not self._guard_session():
+            return
         goal = "Save changes (or Save in overflow ⋮ menu)"
         if overflow:
             if self._save_overflow():
@@ -78,6 +102,8 @@ class PublishUI:
             return False
 
     def click_radio_text(self, pattern: re.Pattern[str], goal: str) -> None:
+        if not self._guard_session():
+            return
         if self.click_button(pattern, goal, timeout=10_000):
             return
         try:
@@ -125,5 +151,11 @@ return false;
                 self.log(f"Selected radio by visible text: {goal}")
             return ok
         except Exception as exc:
-            self.log(f"Radio text fallback failed ({goal}): {exc}")
+            if is_invalid_session_error(exc):
+                self._session_dead = True
+                self.use_vision = False
+                raise BrowserSessionDead(
+                    "Firefox window was closed or crashed — automation stopped."
+                ) from exc
+            self.log(f"Radio text fallback failed ({goal}): {str(exc)[:100]}")
             return False

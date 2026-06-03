@@ -20,6 +20,7 @@ from bravelgo.publish.paths import (  # noqa: E402
     write_privacy_url_file,
 )
 from bravelgo.publish.runner import run_publish  # noqa: E402
+from bravelgo.publish.session_util import BrowserSessionDead  # noqa: E402
 
 LOG_F = publish_log_path()
 
@@ -126,6 +127,10 @@ def main() -> None:
         if result.get("privacy_url"):
             log(f"Privacy URL: {result['privacy_url']}")
         log("Done")
+    except BrowserSessionDead as exc:
+        log(str(exc))
+        log("Partial run — finish Play Console manually, then run Full publish again (keep Firefox open)")
+        sys.exit(0)
     except Exception as exc:
         import traceback
 

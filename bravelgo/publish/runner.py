@@ -23,6 +23,7 @@ from bravelgo.publish.stub_texts import stub_listing, stub_policy
 from bravelgo.publish.profile_resolve import resolve_profile_dir
 from bravelgo.publish.ui_actions import PublishUI
 from bravelgo.publish.page_guard import ensure_console_tab, is_create_app_page
+from bravelgo.publish.session_util import BrowserSessionDead, reset_session_guard
 from bravelgo.publish.wait_console import wait_for_console_ready
 
 
@@ -227,6 +228,7 @@ def run_publish(
     if not need_browser:
         return result
 
+    reset_session_guard()
     log("Opening Firefox (Selenium + your profile)…")
     driver, _, page = launch_context(prof, log, country=country)
     ui = PublishUI(page, log, gemini_api_key=api_key, use_vision=use_vision)
@@ -283,6 +285,7 @@ def run_publish(
                 run_create_application(page, app_name, package, ui)
                 log("Playbook step 2/2: Console dashboard tasks (privacy URL is task #1 there)")
 
+            console_ok = False
             try:
                 run_console_setup(
                     page,
@@ -293,13 +296,16 @@ def run_publish(
                     graphics_dir=pub.get("graphics_dir", ""),
                     ui=ui,
                 )
+                console_ok = True
+            except BrowserSessionDead as exc:
+                log(str(exc))
+                log("Finish remaining Console steps manually — restart Full publish with Firefox open")
             except Exception as exc:
-                import traceback
-
-                log(f"Console automation error: {exc}")
-                log(traceback.format_exc()[-800:])
+                log(f"Console automation stopped: {str(exc)[:200]}")
                 log("Finish remaining Console steps manually in the open Firefox window")
-        completed = True
+            completed = console_ok
+        else:
+            completed = True
     finally:
         if completed:
             close_browser(driver, None, log)

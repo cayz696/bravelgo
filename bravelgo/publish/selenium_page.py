@@ -5,7 +5,9 @@ import re
 import time
 from typing import Any, Pattern
 
-from selenium.common.exceptions import WebDriverException
+from selenium.common.exceptions import InvalidSessionIdException, WebDriverException
+
+from bravelgo.publish.session_util import BrowserSessionDead, is_invalid_session_error
 from selenium.webdriver.common.action_chains import ActionChains
 from selenium.webdriver.common.by import By
 from selenium.webdriver.common.keys import Keys
@@ -14,11 +16,19 @@ from selenium.webdriver.support.ui import WebDriverWait
 
 
 def _safe_find(ctx, by, value) -> list:
-    """find_elements that survives transient 'Failed to decode response from marionette'."""
+    """find_elements that survives transient marionette glitches; abort if session is dead."""
     for attempt in range(2):
         try:
             return ctx.find_elements(by, value)
-        except WebDriverException:
+        except InvalidSessionIdException as exc:
+            raise BrowserSessionDead(
+                "Firefox window was closed or crashed — automation stopped."
+            ) from exc
+        except WebDriverException as exc:
+            if is_invalid_session_error(exc):
+                raise BrowserSessionDead(
+                    "Firefox window was closed or crashed — automation stopped."
+                ) from exc
             if attempt == 0:
                 time.sleep(0.8)
                 continue
